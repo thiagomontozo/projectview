@@ -1,4 +1,4 @@
-# ProjectView — Gestão de Projetos (estilo ClickUp)
+# ProjectView — Gestão de Projetos
 
 Aplicação web de gestão de projetos, equipes e tarefas, com quadro kanban
 (cards arrastáveis), alocação de recursos, alertas individuais de prazo,
