@@ -16,7 +16,16 @@ ADMIN_USER="${BOOTSTRAP_ADMIN_USERNAME:-admin}"
 ADMIN_PASS="${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}"
 
 # -k: the default deployment uses a self-signed certificate.
-CURL=(curl -sk --max-time 20)
+# --http1.1: forced deliberately, not a default we happened to keep. The /ws
+# check below needs a classic HTTP/1.1 Upgrade handshake - that mechanism does
+# not exist in HTTP/2, so a curl build that ALPN-negotiates h2 (as most Linux
+# builds do; the Windows curl.exe used during development did not) gets a 400
+# instead of a 101. Real browsers sidestep this by always opening a dedicated
+# HTTP/1.1 connection for a wss:// handshake, even on a page loaded over
+# HTTP/2, so this matches production client behavior rather than working
+# around it. It also keeps response header casing predictable: HTTP/2 forces
+# field names to lowercase, HTTP/1.1 does not.
+CURL=(curl -sk --http1.1 --max-time 20)
 
 PASS=0
 FAIL=0
@@ -78,13 +87,31 @@ contains "redirect points at https" \
 check "proxy health endpoint" "200" "$(status_of "$HTTP_BASE/healthz")"
 check "SPA is served over HTTPS" "200" "$(status_of "$BASE/")"
 
-headers="$("${CURL[@]}" -I "$BASE/")"
-contains "HSTS header"                 "$headers" "Strict-Transport-Security"
-contains "X-Content-Type-Options"      "$headers" "nosniff"
-contains "X-Frame-Options"             "$headers" "SAMEORIGIN"
-contains "Referrer-Policy"             "$headers" "strict-origin-when-cross-origin"
-contains "Permissions-Policy"          "$headers" "geolocation=()"
-if printf '%s' "$headers" | grep -qi '^server: nginx/'; then
+# A dedicated HTTP/2 client, only to prove ordinary page loads can negotiate
+# it - kept separate from $CURL, which forces HTTP/1.1 everywhere else (see
+# the comment on $CURL above). Skipped, not failed, when the local curl build
+# has no HTTP/2 support at all (some Windows/Git-Bash builds don't) - that is
+# a limitation of the test client, not of the server under test.
+if curl -sk --http2 --max-time 10 -o /dev/null "$BASE/" 2>/tmp/h2-probe-error; then
+    h2_version="$(curl -sk --http2 --max-time 10 -o /dev/null -w '%{http_version}' "$BASE/")"
+    check "ordinary requests can negotiate HTTP/2" "2" "$h2_version"
+elif grep -qi 'does not support' /tmp/h2-probe-error; then
+    printf '  skip ordinary requests can negotiate HTTP/2 (curl built without HTTP/2 support)\n'
+else
+    fail "ordinary requests can negotiate HTTP/2" "$(cat /tmp/h2-probe-error)"
+fi
+rm -f /tmp/h2-probe-error
+
+# Compared case-insensitively: HTTP/2 forces response header field names to
+# lowercase (values are untouched), and $CURL above pins HTTP/1.1 for the rest
+# of this script, so this is the one place that distinction still matters.
+headers_lc="$("${CURL[@]}" -I "$BASE/" | tr '[:upper:]' '[:lower:]')"
+contains "HSTS header"                 "$headers_lc" "strict-transport-security"
+contains "X-Content-Type-Options"      "$headers_lc" "nosniff"
+contains "X-Frame-Options"             "$headers_lc" "sameorigin"
+contains "Referrer-Policy"             "$headers_lc" "strict-origin-when-cross-origin"
+contains "Permissions-Policy"          "$headers_lc" "geolocation=()"
+if printf '%s' "$headers_lc" | grep -q '^server: nginx/'; then
     fail "nginx version is hidden" "server header exposes the version"
 else
     pass "nginx version is hidden"
