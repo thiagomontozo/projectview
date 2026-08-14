@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache-dependency-path: backend/go.sum
 
       - name: Check formatting
@@ -52,7 +52,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache-dependency-path: proxy/gencert/go.mod
 
       - name: Vet and build
@@ -138,16 +138,40 @@ jobs:
       - name: Schema was created on first run
         run: |
           # The requirement is that an empty database is provisioned
-          # automatically, so assert the collections and indexes really exist.
-          docker compose exec -T mongo mongosh pm_dashboard --quiet \
-            --eval 'db.getCollectionNames().sort().forEach(c => print(c))' | tee /tmp/collections
-          for c in users teams projects tasks chatchannels chatmessages notifications; do
-            grep -qx "$c" /tmp/collections || { echo "missing collection: $c" >&2; exit 1; }
+          # automatically, so assert the tables, indexes and the migration
+          # bookkeeping really exist.
+          psql() { docker compose exec -T postgres psql -U projectview -d projectview -tAc "$1"; }
+
+          psql "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" | tee /tmp/tables
+          for t in users teams team_members projects project_members project_statuses \
+                   tasks task_assignees task_comments task_alerts_sent \
+                   chat_channels chat_channel_members chat_messages notifications \
+                   schema_migrations; do
+            grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
-          docker compose exec -T mongo mongosh pm_dashboard --quiet \
-            --eval 'db.tasks.getIndexes().forEach(i => print(i.name))' | tee /tmp/task_indexes
-          grep -q 'assignees' /tmp/task_indexes || { echo "missing assignees index" >&2; exit 1; }
-          grep -q 'parentTask' /tmp/task_indexes || { echo "missing parentTask index" >&2; exit 1; }
+
+          # The migration must be recorded, so a restart does not re-run it.
+          applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='0001_init'")"
+          [ "$applied" = "1" ] || { echo "0001_init not recorded as applied" >&2; exit 1; }
+
+          psql "SELECT indexname FROM pg_indexes WHERE tablename='tasks'" | tee /tmp/task_indexes
+          grep -q 'tasks_board_idx'  /tmp/task_indexes || { echo "missing board index" >&2; exit 1; }
+          grep -q 'tasks_parent_idx' /tmp/task_indexes || { echo "missing parent index" >&2; exit 1; }
+
+          # Referential integrity is the reason for the migration: prove the
+          # cascade from projects down to tasks is actually declared.
+          fks="$(psql "SELECT count(*) FROM information_schema.table_constraints
+                        WHERE constraint_type='FOREIGN KEY' AND table_schema='public'")"
+          [ "$fks" -ge 15 ] || { echo "expected foreign keys are missing (found $fks)" >&2; exit 1; }
+
+      - name: Migrations are idempotent
+        run: |
+          # Restarting must not attempt to re-apply an already-applied version.
+          docker compose restart backend
+          sleep 10
+          docker compose logs backend --no-color | grep -q 'Schema up to date' \
+            || { echo "backend did not detect the schema as already migrated" >&2;
+                 docker compose logs backend --no-color --tail 50; exit 1; }
 
       - name: Container logs
         if: failure()

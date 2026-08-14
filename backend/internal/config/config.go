@@ -9,9 +9,12 @@ import (
 	"strings"
 )
 
-type MongoConfig struct {
-	URI    string
-	DBName string
+// DatabaseConfig points at PostgreSQL. It replaces the previous MongoConfig:
+// the storage engine changed, but the principle did not - the address stays
+// fully configurable through the environment.
+type DatabaseConfig struct {
+	URL      string
+	MaxConns int
 }
 
 type JWTConfig struct {
@@ -54,7 +57,7 @@ type BootstrapConfig struct {
 type Config struct {
 	NodeEnv    string
 	Port       string
-	Mongo      MongoConfig
+	Database   DatabaseConfig
 	JWT        JWTConfig
 	AD         ADConfig
 	SMTP       SMTPConfig
@@ -105,9 +108,9 @@ func Load() *Config {
 		NodeEnv: getenv("NODE_ENV", "development"),
 		Port:    getenv("PORT", "4000"),
 
-		Mongo: MongoConfig{
-			URI:    getenv("MONGO_URI", "mongodb://mongo:27017/pm_dashboard"),
-			DBName: getenv("MONGO_DB_NAME", ""),
+		Database: DatabaseConfig{
+			URL:      getenv("DATABASE_URL", "postgres://projectview:projectview@postgres:5432/projectview?sslmode=disable"),
+			MaxConns: getint("DATABASE_MAX_CONNS", 10),
 		},
 
 		JWT: JWTConfig{

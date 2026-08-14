@@ -3,32 +3,51 @@ package models
 import (
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 )
 
 type ProjectStatus struct {
-	Key   string `bson:"key" json:"key"`
-	Label string `bson:"label" json:"label"`
-	Order int    `bson:"order" json:"order"`
-	Color string `bson:"color" json:"color"`
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Order int    `json:"order"`
+	Color string `json:"color"`
 }
 
 type Project struct {
-	ID          primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
-	Name        string               `bson:"name" json:"name"`
-	Key         string               `bson:"key" json:"key"`
-	Description string               `bson:"description,omitempty" json:"description,omitempty"`
-	Color       string               `bson:"color" json:"color"`
-	Status      string               `bson:"status" json:"status"` // planning|active|on_hold|completed|archived
-	Team        *primitive.ObjectID  `bson:"team,omitempty" json:"team,omitempty"`
-	Members     []primitive.ObjectID `bson:"members" json:"members"`
-	Owner       primitive.ObjectID   `bson:"owner,omitempty" json:"owner,omitempty"`
-	StartDate   *time.Time           `bson:"startDate,omitempty" json:"startDate,omitempty"`
-	EndDate     *time.Time           `bson:"endDate,omitempty" json:"endDate,omitempty"`
-	Statuses    []ProjectStatus      `bson:"statuses" json:"statuses"`
-	CreatedBy   primitive.ObjectID   `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
-	CreatedAt   time.Time            `bson:"createdAt" json:"createdAt"`
-	UpdatedAt   time.Time            `bson:"updatedAt" json:"updatedAt"`
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	Key         string          `json:"key"`
+	Description string          `json:"description,omitempty"`
+	Color       string          `json:"color"`
+	Status      string          `json:"status"`
+	TeamID      *uuid.UUID      `json:"-"`
+	Members     []uuid.UUID     `json:"-"`
+	Owner       *uuid.UUID      `json:"-"`
+	StartDate   *time.Time      `json:"startDate,omitempty"`
+	EndDate     *time.Time      `json:"endDate,omitempty"`
+	Statuses    []ProjectStatus `json:"statuses"`
+	CreatedBy   *uuid.UUID      `json:"-"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
+}
+
+const (
+	ProjectStatusPlanning  = "planning"
+	ProjectStatusActive    = "active"
+	ProjectStatusOnHold    = "on_hold"
+	ProjectStatusCompleted = "completed"
+	ProjectStatusArchived  = "archived"
+)
+
+// ValidProjectStatus mirrors the CHECK constraint on projects.status, so a bad
+// value is refused with a 400 instead of surfacing as a database error.
+func ValidProjectStatus(s string) bool {
+	switch s {
+	case ProjectStatusPlanning, ProjectStatusActive, ProjectStatusOnHold,
+		ProjectStatusCompleted, ProjectStatusArchived:
+		return true
+	}
+	return false
 }
 
 // DefaultStatuses mirrors the kanban columns seeded for every new project.

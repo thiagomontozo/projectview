@@ -69,7 +69,7 @@ func TestGetenvTreatsEmptyAsUnset(t *testing.T) {
 // The integrations must stay off unless explicitly enabled: a deployment that
 // forgets to set them should not try to reach an example.com LDAP or SMTP host.
 func TestLoadDefaultsKeepIntegrationsDisabled(t *testing.T) {
-	for _, key := range []string{"AD_ENABLED", "SMTP_ENABLED", "MONGO_URI", "JWT_SECRET", "ALERT_CRON", "ALERT_WARN_DAYS_BEFORE"} {
+	for _, key := range []string{"AD_ENABLED", "SMTP_ENABLED", "DATABASE_URL", "JWT_SECRET", "ALERT_CRON", "ALERT_WARN_DAYS_BEFORE"} {
 		t.Setenv(key, "")
 	}
 
@@ -81,8 +81,11 @@ func TestLoadDefaultsKeepIntegrationsDisabled(t *testing.T) {
 	if cfg.SMTP.Enabled {
 		t.Error("SMTP is enabled by default")
 	}
-	if cfg.Mongo.URI == "" {
-		t.Error("MONGO_URI has no default")
+	if cfg.Database.URL == "" {
+		t.Error("DATABASE_URL has no default")
+	}
+	if cfg.Database.MaxConns <= 0 {
+		t.Errorf("DATABASE_MAX_CONNS default = %d, want a positive number", cfg.Database.MaxConns)
 	}
 	if cfg.Alerts.CronExpr == "" {
 		t.Error("ALERT_CRON has no default")
@@ -93,8 +96,8 @@ func TestLoadDefaultsKeepIntegrationsDisabled(t *testing.T) {
 }
 
 func TestLoadReadsEnvironment(t *testing.T) {
-	t.Setenv("MONGO_URI", "mongodb://db.internal:27017/custom")
-	t.Setenv("MONGO_DB_NAME", "override")
+	t.Setenv("DATABASE_URL", "postgres://db.internal:5432/custom?sslmode=require")
+	t.Setenv("DATABASE_MAX_CONNS", "25")
 	t.Setenv("AD_ENABLED", "true")
 	t.Setenv("AD_URL", "ldaps://dc.corp.example:636")
 	t.Setenv("SMTP_ENABLED", "yes")
@@ -103,11 +106,11 @@ func TestLoadReadsEnvironment(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.Mongo.URI != "mongodb://db.internal:27017/custom" {
-		t.Errorf("Mongo.URI = %q", cfg.Mongo.URI)
+	if cfg.Database.URL != "postgres://db.internal:5432/custom?sslmode=require" {
+		t.Errorf("Database.URL = %q", cfg.Database.URL)
 	}
-	if cfg.Mongo.DBName != "override" {
-		t.Errorf("Mongo.DBName = %q", cfg.Mongo.DBName)
+	if cfg.Database.MaxConns != 25 {
+		t.Errorf("Database.MaxConns = %d, want 25", cfg.Database.MaxConns)
 	}
 	if !cfg.AD.Enabled {
 		t.Error("AD.Enabled = false, want true")

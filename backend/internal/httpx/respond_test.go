@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 )
 
 func TestJSONWritesStatusAndContentType(t *testing.T) {
@@ -81,34 +81,53 @@ func TestDecodeJSON(t *testing.T) {
 	})
 }
 
-func TestObjectIDs(t *testing.T) {
-	valid := primitive.NewObjectID()
-	other := primitive.NewObjectID()
+func TestUUIDs(t *testing.T) {
+	valid := uuid.New()
+	other := uuid.New()
 
 	t.Run("parses valid ids", func(t *testing.T) {
-		got := ObjectIDs([]string{valid.Hex(), other.Hex()})
+		got := UUIDs([]string{valid.String(), other.String()})
 		if len(got) != 2 || got[0] != valid || got[1] != other {
-			t.Errorf("ObjectIDs = %v, want [%v %v]", got, valid, other)
+			t.Errorf("UUIDs = %v, want [%v %v]", got, valid, other)
 		}
 	})
 
 	t.Run("skips invalid ids instead of failing", func(t *testing.T) {
-		got := ObjectIDs([]string{valid.Hex(), "not-an-id", ""})
+		got := UUIDs([]string{valid.String(), "not-an-id", ""})
 		if len(got) != 1 || got[0] != valid {
-			t.Errorf("ObjectIDs = %v, want [%v]", got, valid)
+			t.Errorf("UUIDs = %v, want [%v]", got, valid)
 		}
 	})
 
-	// Assignees are marshalled straight into Mongo, where a nil slice and an
-	// empty slice are not the same document: nil would store null and break
-	// the "assignees" array queries the alert sweep relies on.
+	// Membership slices are rewritten wholesale by the repositories; an empty
+	// slice means "no members", which must not be confused with nil.
 	t.Run("empty input yields an empty slice, not nil", func(t *testing.T) {
-		got := ObjectIDs(nil)
+		got := UUIDs(nil)
 		if got == nil {
-			t.Fatal("ObjectIDs(nil) returned nil, want an empty slice")
+			t.Fatal("UUIDs(nil) returned nil, want an empty slice")
 		}
 		if len(got) != 0 {
-			t.Errorf("ObjectIDs(nil) = %v, want empty", got)
+			t.Errorf("UUIDs(nil) = %v, want empty", got)
 		}
 	})
+}
+
+// OptionalUUID distinguishes "not supplied / cleared" from "malformed", which
+// is how handlers tell a deliberate unlink from a client bug.
+func TestOptionalUUID(t *testing.T) {
+	id := uuid.New()
+
+	got, ok := OptionalUUID(id.String())
+	if !ok || got == nil || *got != id {
+		t.Errorf("OptionalUUID(valid) = %v, %v", got, ok)
+	}
+
+	got, ok = OptionalUUID("")
+	if !ok || got != nil {
+		t.Errorf("OptionalUUID(\"\") = %v, %v; want nil, true (explicitly cleared)", got, ok)
+	}
+
+	if _, ok := OptionalUUID("garbage"); ok {
+		t.Error("OptionalUUID accepted a malformed id")
+	}
 }

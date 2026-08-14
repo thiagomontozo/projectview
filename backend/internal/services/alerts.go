@@ -6,26 +6,28 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-	"go.mongodb.org/mongo-driver/bson"
 
 	"projectview/internal/config"
-	"projectview/internal/db"
 	"projectview/internal/logger"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
-// AlertScheduler individually alerts every assigned resource about tasks
-// that are coming due soon or already overdue. Each (task, user, alertType)
-// combination is only alerted once, tracked via Task.AlertsSent, so people
-// aren't spammed on every cron tick.
+// AlertScheduler individually alerts every assigned resource about tasks that
+// are coming due soon or already overdue.
+//
+// De-duplication now lives in the database: task_alerts_sent has
+// (task, user, alert_type) as its primary key, and the query that finds work
+// to do excludes rows that already exist. The previous version loaded every
+// task and compared arrays in Go.
 type AlertScheduler struct {
-	store    *db.Store
+	tasks    *repo.Tasks
 	cfg      *config.Config
 	notifier *Notifier
 }
 
-func NewAlertScheduler(store *db.Store, cfg *config.Config, notifier *Notifier) *AlertScheduler {
-	return &AlertScheduler{store: store, cfg: cfg, notifier: notifier}
+func NewAlertScheduler(tasks *repo.Tasks, cfg *config.Config, notifier *Notifier) *AlertScheduler {
+	return &AlertScheduler{tasks: tasks, cfg: cfg, notifier: notifier}
 }
 
 func (s *AlertScheduler) Start() {
@@ -52,84 +54,47 @@ func (s *AlertScheduler) Start() {
 }
 
 func (s *AlertScheduler) RunDeadlineCheck(ctx context.Context) error {
-	now := time.Now()
-	warnThreshold := now.Add(time.Duration(s.cfg.Alerts.WarnDaysBefore) * 24 * time.Hour)
+	threshold := time.Now().Add(time.Duration(s.cfg.Alerts.WarnDaysBefore) * 24 * time.Hour)
 
-	cursor, err := s.store.Tasks().Find(ctx, bson.M{
-		"status":    bson.M{"$ne": "done"},
-		"dueDate":   bson.M{"$ne": nil, "$lte": warnThreshold},
-		"assignees": bson.M{"$exists": true, "$ne": bson.A{}},
-	})
+	pending, err := s.tasks.PendingDeadlineAlerts(ctx, threshold)
 	if err != nil {
 		return err
 	}
-	defer cursor.Close(ctx)
 
 	sent := 0
-	for cursor.Next(ctx) {
-		var task models.Task
-		if err := cursor.Decode(&task); err != nil {
-			continue
-		}
-		if task.DueDate == nil {
-			continue
-		}
-
-		isOverdue := task.DueDate.Before(now)
+	for _, alert := range pending {
 		alertType := models.AlertTypeDueSoon
-		if isOverdue {
+		notifType := models.NotifTaskDueSoon
+		title := fmt.Sprintf("Due soon: %q", alert.Title)
+		body := fmt.Sprintf("This task is due on %s (within %d day(s)).",
+			alert.DueDate.Format("Jan 2, 2006"), s.cfg.Alerts.WarnDaysBefore)
+
+		if alert.Overdue {
 			alertType = models.AlertTypeOverdue
+			notifType = models.NotifTaskOverdue
+			title = fmt.Sprintf("Overdue: %q", alert.Title)
+			body = fmt.Sprintf("This task was due on %s and is now overdue.",
+				alert.DueDate.Format("Jan 2, 2006"))
 		}
 
-		newAlerts := []models.AlertSent{}
-		changed := false
-
-		for _, userID := range task.Assignees {
-			alreadySent := false
-			for _, a := range task.AlertsSent {
-				if a.User == userID && a.Type == alertType {
-					alreadySent = true
-					break
-				}
-			}
-			if alreadySent {
-				continue
-			}
-
-			title := fmt.Sprintf("Due soon: %q", task.Title)
-			body := fmt.Sprintf("This task is due on %s (within %d day(s)).", task.DueDate.Format("Jan 2, 2006"), s.cfg.Alerts.WarnDaysBefore)
-			notifType := models.NotifTaskDueSoon
-			if isOverdue {
-				title = fmt.Sprintf("Overdue: %q", task.Title)
-				body = fmt.Sprintf("This task was due on %s and is now overdue.", task.DueDate.Format("Jan 2, 2006"))
-				notifType = models.NotifTaskOverdue
-			}
-
-			projectID := task.Project
-			if _, err := s.notifier.NotifyUser(ctx, NotifyInput{
-				UserID:  userID,
-				Type:    notifType,
-				Title:   title,
-				Body:    body,
-				Task:    &task.ID,
-				Project: &projectID,
-				Email:   true,
-			}); err != nil {
-				logger.Error("failed to notify user %s about task %s: %v", userID.Hex(), task.ID.Hex(), err)
-				continue
-			}
-
-			newAlerts = append(newAlerts, models.AlertSent{User: userID, Type: alertType, SentAt: now})
-			changed = true
-			sent++
+		taskID, projectID := alert.TaskID, alert.ProjectID
+		if _, err := s.notifier.NotifyUser(ctx, NotifyInput{
+			UserID:  alert.UserID,
+			Type:    notifType,
+			Title:   title,
+			Body:    body,
+			Task:    &taskID,
+			Project: &projectID,
+			Email:   true,
+		}); err != nil {
+			logger.Error("failed to notify user %s about task %s: %v", alert.UserID, alert.TaskID, err)
+			continue
 		}
 
-		if changed {
-			_, err := s.store.Tasks().UpdateByID(ctx, task.ID, bson.M{"$push": bson.M{"alertsSent": bson.M{"$each": newAlerts}}})
-			if err != nil {
-				logger.Error("failed to persist alertsSent for task %s: %v", task.ID.Hex(), err)
-			}
+		if err := s.tasks.MarkAlertSent(ctx, alert.TaskID, alert.UserID, alertType); err != nil {
+			logger.Error("failed to record alert for task %s: %v", alert.TaskID, err)
 		}
+		sent++
 	}
 
 	if sent > 0 {

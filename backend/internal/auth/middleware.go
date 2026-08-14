@@ -5,13 +5,12 @@ import (
 	"net/http"
 	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 
 	"projectview/internal/config"
-	"projectview/internal/db"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
 type ctxKey string
@@ -20,7 +19,7 @@ const userCtxKey ctxKey = "currentUser"
 
 // RequireAuth verifies the JWT (Authorization header or "token" cookie) and
 // attaches the authenticated user to the request context.
-func RequireAuth(store *db.Store, cfg *config.Config) func(http.Handler) http.Handler {
+func RequireAuth(users *repo.Users, cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractToken(r)
@@ -35,20 +34,19 @@ func RequireAuth(store *db.Store, cfg *config.Config) func(http.Handler) http.Ha
 				return
 			}
 
-			userID, err := primitive.ObjectIDFromHex(claims.Subject)
+			userID, err := uuid.Parse(claims.Subject)
 			if err != nil {
 				httpx.Error(w, http.StatusUnauthorized, "Invalid session.")
 				return
 			}
 
-			var user models.User
-			err = store.Users().FindOne(r.Context(), bson.M{"_id": userID}).Decode(&user)
+			user, err := users.ByID(r.Context(), userID)
 			if err != nil || !user.Active {
 				httpx.Error(w, http.StatusUnauthorized, "Invalid session.")
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), userCtxKey, &user)
+			ctx := context.WithValue(r.Context(), userCtxKey, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

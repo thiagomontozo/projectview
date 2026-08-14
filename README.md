@@ -7,7 +7,7 @@ ClickUp: a draggable card dashboard and kanban boards, resource allocation,
 per-person deadline alerts, an internal chat, tracking charts, and login
 integrated with Active Directory. Fully containerized and served over HTTPS.
 
-**Stack:** **Go** backend, **React + TypeScript** frontend, MongoDB, behind an
+**Stack:** **Go** backend, **React + TypeScript** frontend, PostgreSQL, behind an
 **nginx** edge proxy.
 
 ## Features
@@ -30,7 +30,7 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
   assignment notifications, fully configurable through `.env`. When disabled,
   e-mails are logged instead of sent, so the rest of the system keeps working.
 - **Internal chat** — team/project channels (created automatically) and direct
-  messages, with history stored in MongoDB. Messages are sent over REST and
+  messages, with history stored in PostgreSQL. Messages are sent over REST and
   delivered in real time over WebSocket.
 - **Tracking charts** — task distribution by status, workload per resource,
   30-day completion trend, and progress per project.
@@ -39,15 +39,15 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
   chosen order persisted per user in the browser. On top of that, every
   project has a kanban board whose task cards drag between configurable
   columns (`@dnd-kit`).
-- **MongoDB configurable via environment variable** (`MONGO_URI`), with the
-  **schema (collections + indexes) created automatically on first run**, plus
-  an admin user, a sample team and a sample project seeded into an empty
-  database.
+- **PostgreSQL configurable via environment variable** (`DATABASE_URL`), with
+  the **schema created automatically on first run** by migrations embedded in
+  the binary, plus an admin user, a sample team and a sample project seeded
+  into an empty database.
 - **HTTPS by default** — an nginx edge proxy terminates TLS, applies the
   security headers and rate limits, and is the only container published to the
   host.
 - **Fully containerized** with Docker Compose (proxy, frontend, backend,
-  MongoDB).
+  PostgreSQL).
 
 ## Architecture
 
@@ -56,7 +56,7 @@ Internet
    │  HTTPS :443  (HTTP :80 redirects)
    ▼
 ┌─────────┐   /api, /ws   ┌─────────┐        ┌───────┐
-│  proxy  │──────────────▶│ backend │───────▶│ mongo │
+│  proxy  │──────────────▶│ backend │───────▶│  pg   │
 │ (nginx) │               │  (Go)   │        └───────┘
 └────┬────┘               └─────────┘
      │  everything else
@@ -69,7 +69,7 @@ Internet
 ```
 .
 ├── proxy/       TLS termination + routing/security rules (nginx)
-├── backend/     REST API + WebSocket in Go (chi, mongo-driver, go-ldap, JWT, cron)
+├── backend/     REST API + WebSocket in Go (chi, pgx, go-ldap, JWT, cron)
 ├── frontend/    React + TypeScript SPA (Vite) + Recharts + @dnd-kit
 └── ca/          Optional extra root CAs for the build (see below)
 ```
@@ -81,8 +81,8 @@ Internet
   everything else to the SPA. Because TLS ends here, the backend runs with
   `NODE_ENV=production` and its session cookies are marked `secure`.
 - **Backend (Go)** — `net/http` with the [chi](https://github.com/go-chi/chi)
-  router, [mongo-driver](https://github.com/mongodb/mongo-go-driver) for
-  MongoDB, JWT authentication (httpOnly cookie or Bearer token),
+  router, [pgx](https://github.com/jackc/pgx) for PostgreSQL, JWT
+  authentication (httpOnly cookie or Bearer token),
   [go-ldap](https://github.com/go-ldap/ldap) for AD, `net/smtp` for e-mail,
   [robfig/cron](https://github.com/robfig/cron) for deadline alerts, and a
   small WebSocket hub ([gorilla/websocket](https://github.com/gorilla/websocket))
@@ -91,10 +91,12 @@ Internet
   charts, `@dnd-kit` for the draggable dashboard and kanban board, and a
   native WebSocket client (no extra library) for incoming messages and
   notifications — all writes go through the REST API.
-- **Database** — MongoDB. The address is fully configurable through
-  `MONGO_URI` and can point at the bundled container or any other MongoDB
-  (Atlas, on-prem, replica set, …). On first run the backend creates every
-  collection and index it needs.
+- **Database** — PostgreSQL 16. The address is fully configurable through
+  `DATABASE_URL` and can point at the bundled container or any other instance
+  (RDS, Cloud SQL, on-prem, …). On first run the backend applies the migrations
+  embedded in its binary, creating every table and index it needs. Hand-written
+  SQL in a repository layer ([backend/internal/repo](backend/internal/repo));
+  no ORM.
 
 ### About the real-time protocol
 
@@ -135,7 +137,8 @@ This keeps the protocol trivial to implement in Go and easy to exercise with
 
    - Proxy health probe: `https://localhost/healthz`
    - API health probe: `https://localhost/api/health`
-   - MongoDB: `mongodb://127.0.0.1:27017` (bound to loopback for inspection)
+   - PostgreSQL: `postgres://projectview@127.0.0.1:5432/projectview` (bound to
+     loopback for inspection)
 
    The backend and frontend containers are deliberately **not** published to
    the host — they are reachable only through the proxy.
@@ -227,8 +230,8 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 
 | Variable | Description |
 |---|---|
-| `MONGO_URI` | MongoDB connection string (database name is taken from its path) |
-| `MONGO_DB_NAME` | Optional override for the database name |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_MAX_CONNS` | Connection pool size |
 | `JWT_SECRET` | Secret used to sign session tokens |
 | `AD_ENABLED`, `AD_URL`, `AD_BASE_DN`, `AD_DOMAIN`, `AD_BIND_DN`, `AD_BIND_PASSWORD` | Active Directory login |
 | `SMTP_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Internal e-mail |
@@ -238,11 +241,11 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 
 ## Local development (without Docker)
 
-Backend (Go 1.24+):
+Backend (Go 1.25+):
 
 ```bash
 cd backend
-cp ../.env.example .env   # point MONGO_URI at a local Mongo, e.g. mongodb://localhost:27017/pm_dashboard
+cp ../.env.example .env   # point DATABASE_URL at a local Postgres
 go run ./cmd/server
 ```
 
@@ -268,8 +271,8 @@ cd backend
 go test ./...
 ```
 
-They cover the MongoDB URI parsing (so `MONGO_URI` really selects the
-database, and credentials never reach the logs), JWT signing and the tokens
+They cover the connection-string masking (so credentials never reach the
+logs), the embedded migrations, JWT signing and the tokens
 that must be rejected (wrong secret, expired, `alg=none`), the environment
 parsing that decides whether AD and SMTP are enabled, and the HTTP helpers.
 
@@ -305,12 +308,28 @@ pull request:
 | `gencert` | Builds the certificate helper and verifies the certificate it generates (SANs, validity, key) with `openssl` |
 | `frontend` | `npm ci`, TypeScript type-check, production build |
 | `shellcheck` | Lints the shell scripts |
-| `integration` | Brings the full stack up with Docker Compose, waits for every container to report healthy, runs the smoke test, and asserts the collections and indexes were created in MongoDB |
+| `integration` | Brings the full stack up with Docker Compose, waits for every container to report healthy, runs the smoke test, asserts the tables, indexes and foreign keys were created in PostgreSQL, and restarts the backend to prove migrations are idempotent |
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes the
 `backend`, `frontend` and `proxy` images to the GitHub Container Registry —
 after CI passes on `main`, and on `v*` tags. It never publishes an image built
 from a commit whose CI failed.
+
+## Migrating from the MongoDB version
+
+Earlier releases stored data in MongoDB. [`cmd/migrate`](backend/cmd/migrate)
+copies an existing dataset into PostgreSQL:
+
+```bash
+cd backend
+go run ./cmd/migrate \
+  -mongo    "mongodb://localhost:27017/pm_dashboard" \
+  -postgres "postgres://projectview:projectview@localhost:5432/projectview?sslmode=disable"
+```
+
+ObjectIDs are mapped onto UUIDs deterministically, so references between
+documents survive the copy, and every insert is `ON CONFLICT DO NOTHING` —
+the tool is safe to re-run.
 
 ## Data model (summary)
 
@@ -331,7 +350,7 @@ from a commit whose CI failed.
 - Change `JWT_SECRET` and the default admin password before any real use.
 - Install a real TLS certificate in `proxy/certs/` — the self-signed fallback
   is for local runs only.
-- Set `MONGO_ROOT_USERNAME`/`MONGO_ROOT_PASSWORD` and use a `MONGO_URI` with
-  credentials in production.
+- Change `POSTGRES_PASSWORD` and use a `DATABASE_URL` with strong credentials
+  and `sslmode=require` in production.
 - Narrow `CORS_ORIGIN` to your domain if you expose the API to external
   clients; traffic from the SPA itself is same-origin behind the proxy.

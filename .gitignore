@@ -4,6 +4,9 @@ dist/
 *.log
 /backend/tmp/
 
+# Local editor/agent settings, not project configuration
+.claude/settings.local.json
+
 # Compiled Go binaries and coverage output
 *.exe
 coverage.out

@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 
 	"projectview/internal/logger"
 )
@@ -36,32 +36,45 @@ func Error(w http.ResponseWriter, status int, message string) {
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst interface{}) bool {
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		Error(w, http.StatusBadRequest, "Corpo da requisição inválido: "+err.Error())
+		Error(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return false
 	}
 	return true
 }
 
-// ObjectIDParam parses a chi URL param as a Mongo ObjectID, writing a 400
-// response (and returning ok=false) if it's missing/invalid.
-func ObjectIDParam(w http.ResponseWriter, r *http.Request, name string) (primitive.ObjectID, bool) {
+// UUIDParam parses a chi URL param as a UUID, writing a 400 response (and
+// returning ok=false) if it's missing or malformed.
+func UUIDParam(w http.ResponseWriter, r *http.Request, name string) (uuid.UUID, bool) {
 	raw := chi.URLParam(r, name)
-	id, err := primitive.ObjectIDFromHex(raw)
+	id, err := uuid.Parse(raw)
 	if err != nil {
 		Error(w, http.StatusBadRequest, "Invalid id: "+raw)
-		return primitive.NilObjectID, false
+		return uuid.Nil, false
 	}
 	return id, true
 }
 
-// ObjectIDs converts a slice of hex strings to ObjectIDs, skipping any that
-// fail to parse (defensive - the frontend always sends valid ids).
-func ObjectIDs(hexes []string) []primitive.ObjectID {
-	out := make([]primitive.ObjectID, 0, len(hexes))
-	for _, h := range hexes {
-		if id, err := primitive.ObjectIDFromHex(h); err == nil {
+// UUIDs converts a slice of strings to UUIDs, skipping any that fail to parse
+// (defensive - the frontend always sends valid ids).
+func UUIDs(raw []string) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(raw))
+	for _, s := range raw {
+		if id, err := uuid.Parse(s); err == nil {
 			out = append(out, id)
 		}
 	}
 	return out
+}
+
+// OptionalUUID parses an id that may legitimately be absent. Returns (nil, true)
+// for an empty string, meaning "explicitly cleared".
+func OptionalUUID(raw string) (*uuid.UUID, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, false
+	}
+	return &id, true
 }

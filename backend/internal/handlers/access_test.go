@@ -3,13 +3,13 @@ package handlers
 import (
 	"testing"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 
 	"projectview/internal/models"
 )
 
 func user(role string) *models.User {
-	return &models.User{ID: primitive.NewObjectID(), Role: role}
+	return &models.User{ID: uuid.New(), Role: role}
 }
 
 func TestIsAdmin(t *testing.T) {
@@ -49,7 +49,7 @@ func TestIsProjectMember(t *testing.T) {
 	member := user(models.RoleMember)
 	outsider := user(models.RoleMember)
 
-	project := &models.Project{Owner: owner.ID, Members: []primitive.ObjectID{member.ID}}
+	project := &models.Project{Owner: &owner.ID, Members: []uuid.UUID{member.ID}}
 
 	if !isProjectMember(project, owner) {
 		t.Error("owner not treated as a member")
@@ -74,7 +74,7 @@ func TestCanWorkOnProject(t *testing.T) {
 	// A manager who is not on the project has no business editing its tasks.
 	strangerManager := user(models.RoleManager)
 
-	project := &models.Project{Owner: owner.ID, Members: []primitive.ObjectID{member.ID}}
+	project := &models.Project{Owner: &owner.ID, Members: []uuid.UUID{member.ID}}
 
 	cases := []struct {
 		name string
@@ -104,8 +104,8 @@ func TestCanManageProject(t *testing.T) {
 	managerOutsider := user(models.RoleManager)
 
 	project := &models.Project{
-		Owner:   owner.ID,
-		Members: []primitive.ObjectID{member.ID, managerMember.ID},
+		Owner:   &owner.ID,
+		Members: []uuid.UUID{member.ID, managerMember.ID},
 	}
 
 	cases := []struct {
@@ -132,7 +132,7 @@ func TestCanManageProject(t *testing.T) {
 func TestManageImpliesWorkButNotViceVersa(t *testing.T) {
 	owner := user(models.RoleMember)
 	member := user(models.RoleMember)
-	project := &models.Project{Owner: owner.ID, Members: []primitive.ObjectID{member.ID}}
+	project := &models.Project{Owner: &owner.ID, Members: []uuid.UUID{member.ID}}
 
 	for _, u := range []*models.User{owner, member, user(models.RoleAdmin), user(models.RoleManager)} {
 		if canManageProject(project, u) && !canWorkOnProject(project, u) {
@@ -150,7 +150,7 @@ func TestCanManageTeam(t *testing.T) {
 	admin := user(models.RoleAdmin)
 	manager := user(models.RoleManager)
 
-	team := &models.Team{LeadID: &lead.ID, Members: []primitive.ObjectID{lead.ID, other.ID}}
+	team := &models.Team{LeadID: &lead.ID, Members: []uuid.UUID{lead.ID, other.ID}}
 
 	if !canManageTeam(team, lead) {
 		t.Error("team lead cannot manage their own team")
@@ -166,7 +166,7 @@ func TestCanManageTeam(t *testing.T) {
 		t.Error("unrelated manager can manage the team")
 	}
 
-	leaderless := &models.Team{Members: []primitive.ObjectID{other.ID}}
+	leaderless := &models.Team{Members: []uuid.UUID{other.ID}}
 	if canManageTeam(leaderless, other) {
 		t.Error("member can manage a team that has no lead")
 	}
@@ -203,9 +203,10 @@ func TestCanEditUser(t *testing.T) {
 // ordinary member acting on a project they have nothing to do with.
 func TestOutsiderCannotTouchForeignProject(t *testing.T) {
 	outsider := user(models.RoleMember)
+	strangerOwner := uuid.New()
 	project := &models.Project{
-		Owner:   primitive.NewObjectID(),
-		Members: []primitive.ObjectID{primitive.NewObjectID()},
+		Owner:   &strangerOwner,
+		Members: []uuid.UUID{uuid.New()},
 	}
 
 	if canWorkOnProject(project, outsider) {

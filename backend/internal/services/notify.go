@@ -2,72 +2,64 @@ package services
 
 import (
 	"context"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 
-	"projectview/internal/db"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 	"projectview/internal/ws"
 )
 
 type Notifier struct {
-	store  *db.Store
-	hub    *ws.Hub
-	mailer *Mailer
+	notifications *repo.Notifications
+	users         *repo.Users
+	hub           *ws.Hub
+	mailer        *Mailer
 }
 
-func NewNotifier(store *db.Store, hub *ws.Hub, mailer *Mailer) *Notifier {
-	return &Notifier{store: store, hub: hub, mailer: mailer}
+func NewNotifier(notifications *repo.Notifications, users *repo.Users, hub *ws.Hub, mailer *Mailer) *Notifier {
+	return &Notifier{notifications: notifications, users: users, hub: hub, mailer: mailer}
 }
 
 type NotifyInput struct {
-	UserID  primitive.ObjectID
+	UserID  uuid.UUID
 	Type    string
 	Title   string
 	Body    string
-	Task    *primitive.ObjectID
-	Project *primitive.ObjectID
+	Task    *uuid.UUID
+	Project *uuid.UUID
 	Email   bool
 }
 
-// NotifyUser creates a persisted notification, pushes it in real time over
-// the WebSocket hub, and optionally emails the user (used both for deadline
-// alerts and general task events like assignment/comments).
+// NotifyUser creates a persisted notification, pushes it in real time over the
+// WebSocket hub, and optionally emails the user (used both for deadline alerts
+// and general task events like assignment and comments).
 func (n *Notifier) NotifyUser(ctx context.Context, in NotifyInput) (*models.Notification, error) {
-	now := time.Now()
-	notification := models.Notification{
-		ID:        primitive.NewObjectID(),
-		User:      in.UserID,
-		Type:      in.Type,
-		Title:     in.Title,
-		Body:      in.Body,
-		Task:      in.Task,
-		Project:   in.Project,
-		Read:      false,
-		CreatedAt: now,
-		UpdatedAt: now,
+	notification := &models.Notification{
+		ID:      uuid.New(),
+		User:    in.UserID,
+		Type:    in.Type,
+		Title:   in.Title,
+		Body:    in.Body,
+		Task:    in.Task,
+		Project: in.Project,
 	}
-
-	if _, err := n.store.Notifications().InsertOne(ctx, notification); err != nil {
+	if err := n.notifications.Create(ctx, notification); err != nil {
 		return nil, err
 	}
 
 	if n.hub != nil {
-		n.hub.SendToUser(in.UserID.Hex(), ws.Message{Type: "notification", Payload: notification})
+		n.hub.SendToUser(in.UserID.String(), ws.Message{Type: "notification", Payload: notification})
 	}
 
 	if in.Email {
-		var user models.User
-		if err := n.store.Users().FindOne(ctx, bson.M{"_id": in.UserID}).Decode(&user); err == nil {
-			if user.NotifyByEmail {
-				go func() {
-					_ = n.mailer.Send(user.Email, in.Title, "<p>"+in.Body+"</p>")
-				}()
-			}
+		if user, err := n.users.ByID(ctx, in.UserID); err == nil && user.NotifyByEmail {
+			email, title, body := user.Email, in.Title, in.Body
+			go func() {
+				_ = n.mailer.Send(email, title, "<p>"+body+"</p>")
+			}()
 		}
 	}
 
-	return &notification, nil
+	return notification, nil
 }

@@ -1,4 +1,8 @@
 // Package router wires every HTTP route to its handler and middleware.
+//
+// Authorization note: beyond the role gates wired below, per-resource rules
+// (project membership, team leadership, self-vs-admin) are enforced inside the
+// handlers, where the target row is available. See handlers/access.go.
 package router
 
 import (
@@ -9,19 +13,12 @@ import (
 
 	"projectview/internal/auth"
 	"projectview/internal/config"
-	"projectview/internal/db"
 	"projectview/internal/handlers"
 	"projectview/internal/models"
 	"projectview/internal/ws"
 )
 
-// Authorization note: beyond the role gates wired below, per-resource rules
-// (project membership, team leadership, self-vs-admin) are enforced inside the
-// handlers, where the target document is available. See handlers/access.go.
-
-func New(store *db.Store, cfg *config.Config, hub *ws.Hub) http.Handler {
-	api := handlers.New(store, cfg, hub)
-
+func New(api *handlers.API, cfg *config.Config, hub *ws.Hub) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
@@ -37,7 +34,7 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub) http.Handler {
 	// Realtime push channel (auth via ?token=, see handlers.ServeWS).
 	r.Get("/ws", api.ServeWS)
 
-	requireAuth := auth.RequireAuth(store, cfg)
+	requireAuth := auth.RequireAuth(api.Users, cfg)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Get("/config", api.AuthConfig)

@@ -1,24 +1,24 @@
-// Package seed bootstraps a brand-new database with a default admin user,
-// a starter team and a starter project, so the app is usable immediately
-// after "docker compose up" even before AD/SMTP are configured.
+// Package seed bootstraps a brand-new database with a default admin user, a
+// starter team and a starter project, so the app is usable immediately after
+// "docker compose up" even before AD/SMTP are configured.
 package seed
 
 import (
 	"context"
-	"time"
+	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"projectview/internal/config"
-	"projectview/internal/db"
 	"projectview/internal/logger"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
-func Run(ctx context.Context, store *db.Store, cfg *config.Config) error {
-	count, err := store.Users().CountDocuments(ctx, bson.M{})
+// Run creates the starter workspace when the database has no users yet.
+func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, projects *repo.Projects, chat *repo.Chat, cfg *config.Config) error {
+	count, err := users.Count(ctx)
 	if err != nil {
 		return err
 	}
@@ -34,76 +34,62 @@ func Run(ctx context.Context, store *db.Store, cfg *config.Config) error {
 		return err
 	}
 
-	now := time.Now()
-	admin := models.User{
-		ID:            primitive.NewObjectID(),
-		Username:      cfg.Bootstrap.AdminUsername,
+	admin := &models.User{
+		ID:            uuid.New(),
+		Username:      strings.ToLower(cfg.Bootstrap.AdminUsername),
 		Name:          cfg.Bootstrap.AdminName,
-		Email:         cfg.Bootstrap.AdminEmail,
+		Email:         strings.ToLower(cfg.Bootstrap.AdminEmail),
 		PasswordHash:  string(hash),
 		AuthSource:    models.AuthSourceLocal,
 		Role:          models.RoleAdmin,
 		AvatarColor:   "#2a78d6",
-		Teams:         []primitive.ObjectID{},
 		Active:        true,
 		NotifyByEmail: true,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
-	if _, err := store.Users().InsertOne(ctx, admin); err != nil {
+	if err := users.Create(ctx, admin); err != nil {
 		return err
 	}
 
-	team := models.Team{
-		ID:          primitive.NewObjectID(),
+	team := &models.Team{
+		ID:          uuid.New(),
 		Name:        "Default Team",
 		Description: "Automatically created on first run. Rename or replace as needed.",
 		Color:       "#0ea5e9",
-		Members:     []primitive.ObjectID{admin.ID},
+		Members:     []uuid.UUID{admin.ID},
 		LeadID:      &admin.ID,
-		CreatedBy:   admin.ID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedBy:   &admin.ID,
 	}
-	if _, err := store.Teams().InsertOne(ctx, team); err != nil {
+	if err := teams.Create(ctx, team); err != nil {
 		return err
 	}
 
-	if _, err := store.Users().UpdateByID(ctx, admin.ID, bson.M{"$addToSet": bson.M{"teams": team.ID}}); err != nil {
-		return err
-	}
-
-	project := models.Project{
-		ID:          primitive.NewObjectID(),
+	project := &models.Project{
+		ID:          uuid.New(),
 		Name:        "Sample Project",
 		Key:         "SAMPLE",
 		Description: "A starter project you can rename, archive, or delete.",
 		Color:       "#8b5cf6",
-		Status:      "planning",
-		Team:        &team.ID,
-		Members:     []primitive.ObjectID{admin.ID},
-		Owner:       admin.ID,
+		Status:      models.ProjectStatusPlanning,
+		TeamID:      &team.ID,
+		Members:     []uuid.UUID{admin.ID},
+		Owner:       &admin.ID,
 		Statuses:    models.DefaultStatuses(),
-		CreatedBy:   admin.ID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedBy:   &admin.ID,
 	}
-	if _, err := store.Projects().InsertOne(ctx, project); err != nil {
+	if err := projects.Create(ctx, project); err != nil {
 		return err
 	}
 
-	channel := models.ChatChannel{
-		ID:        primitive.NewObjectID(),
+	channel := &models.ChatChannel{
+		ID:        uuid.New(),
 		Name:      "# " + project.Name,
-		Type:      "project",
-		Project:   &project.ID,
-		Team:      &team.ID,
-		Members:   []primitive.ObjectID{admin.ID},
-		CreatedBy: admin.ID,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Type:      models.ChannelTypeProject,
+		ProjectID: &project.ID,
+		TeamID:    &team.ID,
+		Members:   []uuid.UUID{admin.ID},
+		CreatedBy: &admin.ID,
 	}
-	if _, err := store.ChatChannels().InsertOne(ctx, channel); err != nil {
+	if err := chat.CreateChannel(ctx, channel); err != nil {
 		return err
 	}
 

@@ -3,15 +3,13 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/google/uuid"
 
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
 type teamResponse struct {
@@ -20,64 +18,56 @@ type teamResponse struct {
 	Lead             *PublicUser  `json:"leadId,omitempty"`
 }
 
-func (a *API) populateTeam(ctx context.Context, t models.Team) teamResponse {
-	users, _ := a.usersByID(ctx, uniqueIDs(t.Members))
-	resp := teamResponse{Team: t, MembersPopulated: []PublicUser{}}
-	for _, m := range t.Members {
-		if u, ok := users[m]; ok {
-			resp.MembersPopulated = append(resp.MembersPopulated, u)
+// populateTeams resolves every member of every team with one users query.
+func (a *API) populateTeams(ctx context.Context, teams []models.Team) []teamResponse {
+	ids := []uuid.UUID{}
+	for _, t := range teams {
+		ids = append(ids, t.Members...)
+		if t.LeadID != nil {
+			ids = append(ids, *t.LeadID)
 		}
 	}
-	if t.LeadID != nil {
-		if u, ok := users[*t.LeadID]; ok {
-			resp.Lead = &u
-		} else {
-			leadUsers, _ := a.usersByID(ctx, []primitive.ObjectID{*t.LeadID})
-			if u, ok := leadUsers[*t.LeadID]; ok {
+	users := a.usersByID(ctx, uniqueIDs(ids))
+
+	out := make([]teamResponse, 0, len(teams))
+	for _, t := range teams {
+		resp := teamResponse{Team: t, MembersPopulated: publicList(users, t.Members)}
+		if t.LeadID != nil {
+			if u, ok := users[*t.LeadID]; ok {
 				resp.Lead = &u
 			}
 		}
+		out = append(out, resp)
 	}
-	return resp
+	return out
+}
+
+func (a *API) populateTeam(ctx context.Context, t models.Team) teamResponse {
+	return a.populateTeams(ctx, []models.Team{t})[0]
 }
 
 // GET /api/teams
 func (a *API) ListTeams(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	cursor, err := a.Store.Teams().Find(ctx, bson.M{})
+	teams, err := a.Teams.List(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer cursor.Close(ctx)
-
-	teams := []teamResponse{}
-	for cursor.Next(ctx) {
-		var t models.Team
-		if err := cursor.Decode(&t); err != nil {
-			continue
-		}
-		teams = append(teams, a.populateTeam(ctx, t))
-	}
-	httpx.JSON(w, http.StatusOK, teams)
+	httpx.JSON(w, http.StatusOK, a.populateTeams(r.Context(), teams))
 }
 
 // GET /api/teams/:id
 func (a *API) GetTeam(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	var t models.Team
-	err := a.Store.Teams().FindOne(r.Context(), bson.M{"_id": id}).Decode(&t)
-	if err == mongo.ErrNoDocuments {
-		httpx.Error(w, http.StatusNotFound, "Team not found.")
-		return
-	} else if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	t, err := a.Teams.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "Team not found.")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, a.populateTeam(r.Context(), t))
+	httpx.JSON(w, http.StatusOK, a.populateTeam(r.Context(), *t))
 }
 
 type createTeamRequest struct {
@@ -109,37 +99,38 @@ func (a *API) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	if color == "" {
 		color = "#0ea5e9"
 	}
-	now := time.Now()
-	team := models.Team{
-		ID:          primitive.NewObjectID(),
+	team := &models.Team{
+		ID:          uuid.New(),
 		Name:        req.Name,
 		Description: req.Description,
 		Color:       color,
-		Members:     httpx.ObjectIDs(req.MemberIDs),
-		CreatedBy:   requester.ID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Members:     httpx.UUIDs(req.MemberIDs),
+		CreatedBy:   &requester.ID,
 	}
-	if req.LeadID != "" {
-		if leadID, err := primitive.ObjectIDFromHex(req.LeadID); err == nil {
-			team.LeadID = &leadID
-		}
+	if leadID, ok := httpx.OptionalUUID(req.LeadID); ok && leadID != nil {
+		team.LeadID = leadID
 	}
 
 	ctx := r.Context()
-	if _, err := a.Store.Teams().InsertOne(ctx, team); err != nil {
+	if err := a.Teams.Create(ctx, team); err != nil {
+		if repo.IsUniqueViolation(err) {
+			httpx.Error(w, http.StatusConflict, "A team with that name already exists.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if len(team.Members) > 0 {
-		_, _ = a.Store.Users().UpdateMany(ctx, bson.M{"_id": bson.M{"$in": team.Members}}, bson.M{"$addToSet": bson.M{"teams": team.ID}})
-	}
 
-	httpx.JSON(w, http.StatusCreated, a.populateTeam(ctx, team))
+	created, err := a.Teams.ByID(ctx, team.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, a.populateTeam(ctx, *created))
 }
 
 // updateTeamRequest is an explicit allow-list, for the same reason as
-// updateProjectRequest: the previous map-into-$set accepted any field.
+// updateProjectRequest: the previous version accepted any field.
 type updateTeamRequest struct {
 	Name        *string   `json:"name"`
 	Description *string   `json:"description"`
@@ -150,7 +141,7 @@ type updateTeamRequest struct {
 
 // PUT /api/teams/:id
 func (a *API) UpdateTeam(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
@@ -162,51 +153,40 @@ func (a *API) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
+	if req.Name != nil && *req.Name == "" {
+		httpx.Error(w, http.StatusBadRequest, "Team name cannot be empty.")
+		return
+	}
 
-	set := bson.M{"updatedAt": time.Now()}
-	if req.Name != nil {
-		if *req.Name == "" {
-			httpx.Error(w, http.StatusBadRequest, "Team name cannot be empty.")
-			return
-		}
-		set["name"] = *req.Name
-	}
-	if req.Description != nil {
-		set["description"] = *req.Description
-	}
-	if req.Color != nil {
-		set["color"] = *req.Color
-	}
+	patch := repo.TeamPatch{Name: req.Name, Description: req.Description, Color: req.Color}
 	if req.LeadID != nil {
-		if *req.LeadID == "" {
-			set["leadId"] = nil
-		} else if leadID, err := primitive.ObjectIDFromHex(*req.LeadID); err == nil {
-			set["leadId"] = leadID
-		} else {
+		leadID, valid := httpx.OptionalUUID(*req.LeadID)
+		if !valid {
 			httpx.Error(w, http.StatusBadRequest, "Invalid leadId.")
 			return
 		}
+		patch.LeadID = &leadID
 	}
 	if req.MemberIDs != nil {
-		set["members"] = httpx.ObjectIDs(*req.MemberIDs)
+		members := httpx.UUIDs(*req.MemberIDs)
+		patch.Members = &members
 	}
 
-	_, err := a.Store.Teams().UpdateByID(r.Context(), id, bson.M{"$set": set})
+	if err := a.Teams.Update(r.Context(), id, patch); err != nil {
+		respondRepoError(w, err, "Team not found.")
+		return
+	}
+	updated, err := a.Teams.ByID(r.Context(), id)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		respondRepoError(w, err, "Team not found.")
 		return
 	}
-	var t models.Team
-	if err := a.Store.Teams().FindOne(r.Context(), bson.M{"_id": id}).Decode(&t); err != nil {
-		httpx.Error(w, http.StatusNotFound, "Team not found.")
-		return
-	}
-	httpx.JSON(w, http.StatusOK, a.populateTeam(r.Context(), t))
+	httpx.JSON(w, http.StatusOK, a.populateTeam(r.Context(), *updated))
 }
 
 // DELETE /api/teams/:id
 func (a *API) DeleteTeam(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
@@ -214,9 +194,8 @@ func (a *API) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "Only administrators can delete teams.")
 		return
 	}
-	_, err := a.Store.Teams().DeleteOne(r.Context(), bson.M{"_id": id})
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if err := a.Teams.Delete(r.Context(), id); err != nil {
+		respondRepoError(w, err, "Team not found.")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -228,7 +207,7 @@ type memberRequest struct {
 
 // POST /api/teams/:id/members
 func (a *API) AddTeamMember(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
@@ -239,48 +218,43 @@ func (a *API) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	userID, err := primitive.ObjectIDFromHex(req.UserID)
+	userID, err := uuid.Parse(req.UserID)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "Invalid userId.")
 		return
 	}
-
-	ctx := r.Context()
-	_, err = a.Store.Teams().UpdateByID(ctx, id, bson.M{"$addToSet": bson.M{"members": userID}})
-	if err != nil {
+	if err := a.Teams.AddMember(r.Context(), id, userID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_, _ = a.Store.Users().UpdateByID(ctx, userID, bson.M{"$addToSet": bson.M{"teams": id}})
-
-	var t models.Team
-	_ = a.Store.Teams().FindOne(ctx, bson.M{"_id": id}).Decode(&t)
-	httpx.JSON(w, http.StatusOK, a.populateTeam(ctx, t))
+	a.respondTeam(w, r, id)
 }
 
 // DELETE /api/teams/:id/members/:userId
 func (a *API) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	userID, ok := httpx.ObjectIDParam(w, r, "userId")
+	userID, ok := httpx.UUIDParam(w, r, "userId")
 	if !ok {
 		return
 	}
 	if _, ok := a.requireTeamManage(w, r, id); !ok {
 		return
 	}
-
-	ctx := r.Context()
-	_, err := a.Store.Teams().UpdateByID(ctx, id, bson.M{"$pull": bson.M{"members": userID}})
-	if err != nil {
+	if err := a.Teams.RemoveMember(r.Context(), id, userID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_, _ = a.Store.Users().UpdateByID(ctx, userID, bson.M{"$pull": bson.M{"teams": id}})
+	a.respondTeam(w, r, id)
+}
 
-	var t models.Team
-	_ = a.Store.Teams().FindOne(ctx, bson.M{"_id": id}).Decode(&t)
-	httpx.JSON(w, http.StatusOK, a.populateTeam(ctx, t))
+func (a *API) respondTeam(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	t, err := a.Teams.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "Team not found.")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, a.populateTeam(r.Context(), *t))
 }

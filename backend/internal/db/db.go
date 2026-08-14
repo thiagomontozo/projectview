@@ -1,164 +1,220 @@
-// Package db owns the MongoDB connection and is responsible for creating
-// the full schema (collections + indexes) the very first time the app boots
-// against an empty database.
+// Package db owns the PostgreSQL connection pool and applies the embedded
+// migrations, which is how the schema gets created on first run.
 package db
 
 import (
 	"context"
+	"embed"
+	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"projectview/internal/config"
 	"projectview/internal/logger"
 )
 
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
+// Store is the handle every repository takes. It exposes the pool directly so
+// repositories can choose between pool-level calls and an explicit
+// transaction (see WithTx).
 type Store struct {
-	Client *mongo.Client
-	DB     *mongo.Database
+	Pool *pgxpool.Pool
 }
 
-const (
-	ColUsers         = "users"
-	ColTeams         = "teams"
-	ColProjects      = "projects"
-	ColTasks         = "tasks"
-	ColChatChannels  = "chatchannels"
-	ColChatMessages  = "chatmessages"
-	ColNotifications = "notifications"
-)
+var maskCreds = regexp.MustCompile(`//([^:/@]+):([^@]+)@`)
 
-var maskCreds = regexp.MustCompile(`//([^:]+):([^@]+)@`)
-
-func maskURI(uri string) string {
-	return maskCreds.ReplaceAllString(uri, "//$1:****@")
+func maskURL(dsn string) string {
+	return maskCreds.ReplaceAllString(dsn, "//$1:****@")
 }
 
-// dbNameFromURI extracts the default database from a MongoDB connection
-// string, i.e. the path component of "mongodb://host:27017/<db>?options".
-// Returns "" when the URI carries no database, letting the caller fall back
-// to MONGO_DB_NAME or the built-in default.
-func dbNameFromURI(uri string) string {
-	for _, scheme := range []string{"mongodb+srv://", "mongodb://"} {
-		if !strings.HasPrefix(uri, scheme) {
-			continue
-		}
-		rest := uri[len(scheme):]
-		slash := strings.Index(rest, "/")
-		if slash == -1 {
-			return ""
-		}
-		name := rest[slash+1:]
-		if q := strings.IndexAny(name, "?"); q != -1 {
-			name = name[:q]
-		}
-		if unescaped, err := url.PathUnescape(name); err == nil {
-			name = unescaped
-		}
-		return name
-	}
-	return ""
-}
-
-// Connect dials MongoDB using the configured URI and materializes the full
-// schema (collections + indexes) for a brand-new database.
+// Connect dials PostgreSQL, waits for it to accept queries, and brings the
+// schema up to date.
 func Connect(cfg *config.Config) (*Store, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	clientOpts := options.Client().ApplyURI(cfg.Mongo.URI)
-	client, err := mongo.Connect(ctx, clientOpts)
+	poolCfg, err := pgxpool.ParseConfig(cfg.Database.URL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid DATABASE_URL: %w", err)
+	}
+	poolCfg.MaxConns = int32(cfg.Database.MaxConns)
+	poolCfg.MaxConnLifetime = time.Hour
+	poolCfg.MaxConnIdleTime = 30 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := client.Ping(ctx, nil); err != nil {
+	// The database container may still be starting up; retry rather than
+	// crash-looping the whole service.
+	if err := waitForDatabase(ctx, pool); err != nil {
+		pool.Close()
 		return nil, err
 	}
 
-	dbName := cfg.Mongo.DBName
-	if dbName == "" {
-		dbName = dbNameFromURI(cfg.Mongo.URI)
-		if dbName == "" {
-			dbName = "pm_dashboard"
-		}
-	}
+	store := &Store{Pool: pool}
+	logger.Info("PostgreSQL connected -> %s", maskURL(cfg.Database.URL))
 
-	store := &Store{Client: client, DB: client.Database(dbName)}
-	logger.Info("MongoDB connected -> %s (db=%s)", maskURI(cfg.Mongo.URI), dbName)
-
-	if err := store.ensureSchema(ctx); err != nil {
-		return nil, err
+	if err := store.Migrate(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("migrations failed: %w", err)
 	}
 
 	return store, nil
 }
 
-// ensureSchema creates every collection (if missing) and its indexes. This
-// implements the "create schema on first run" requirement: on an empty
-// database, every collection + index defined below is materialized here.
-func (s *Store) ensureSchema(ctx context.Context) error {
-	collections := []string{ColUsers, ColTeams, ColProjects, ColTasks, ColChatChannels, ColChatMessages, ColNotifications}
-	for _, name := range collections {
-		if err := s.DB.CreateCollection(ctx, name); err != nil {
-			// Already exists is fine; anything else is logged but non-fatal
-			// so a partially-provisioned DB doesn't block boot entirely.
-			logger.Warn("createCollection(%s): %v", name, err)
+func waitForDatabase(ctx context.Context, pool *pgxpool.Pool) error {
+	var lastErr error
+	for attempt := 1; attempt <= 30; attempt++ {
+		if err := pool.Ping(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("database not reachable: %w", lastErr)
+		case <-time.After(2 * time.Second):
 		}
 	}
+	return fmt.Errorf("database not reachable after 30 attempts: %w", lastErr)
+}
 
-	indexModels := map[string][]mongo.IndexModel{
-		ColUsers: {
-			{Keys: bson.D{{Key: "email", Value: 1}}, Options: options.Index().SetUnique(true)},
-			{Keys: bson.D{{Key: "username", Value: 1}}, Options: options.Index().SetUnique(true)},
-		},
-		ColTeams: {
-			{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
-		},
-		ColProjects: {
-			{Keys: bson.D{{Key: "key", Value: 1}}, Options: options.Index().SetUnique(true)},
-			{Keys: bson.D{{Key: "team", Value: 1}}},
-		},
-		ColTasks: {
-			{Keys: bson.D{{Key: "project", Value: 1}, {Key: "status", Value: 1}, {Key: "order", Value: 1}}},
-			{Keys: bson.D{{Key: "assignees", Value: 1}}},
-			{Keys: bson.D{{Key: "dueDate", Value: 1}}},
-			{Keys: bson.D{{Key: "parentTask", Value: 1}}},
-		},
-		ColChatChannels: {
-			{Keys: bson.D{{Key: "members", Value: 1}}},
-			{Keys: bson.D{{Key: "project", Value: 1}}},
-			{Keys: bson.D{{Key: "team", Value: 1}}},
-		},
-		ColChatMessages: {
-			{Keys: bson.D{{Key: "channel", Value: 1}, {Key: "createdAt", Value: -1}}},
-		},
-		ColNotifications: {
-			{Keys: bson.D{{Key: "user", Value: 1}, {Key: "read", Value: 1}, {Key: "createdAt", Value: -1}}},
-		},
+// Close releases the pool.
+func (s *Store) Close() {
+	if s.Pool != nil {
+		s.Pool.Close()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Migrations
+//
+// Deliberately hand-rolled instead of pulling in a migration framework: the
+// history here is linear and forward-only, and the alternatives drag in
+// drivers for databases this project will never use (ClickHouse, SQL Server,
+// SQLite) just to run a few CREATE TABLEs.
+//
+// Each file runs inside its own transaction together with the bookkeeping
+// insert, so a failure leaves no half-applied version behind.
+// ---------------------------------------------------------------------------
+
+// Migrate applies every migration that has not run yet, in filename order.
+func (s *Store) Migrate(ctx context.Context) error {
+	_, err := s.Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version     text PRIMARY KEY,
+			applied_at  timestamptz NOT NULL DEFAULT now()
+		)`)
+	if err != nil {
+		return fmt.Errorf("creating schema_migrations: %w", err)
 	}
 
-	for col, models := range indexModels {
-		_, err := s.DB.Collection(col).Indexes().CreateMany(ctx, models)
-		if err != nil {
-			logger.Warn("ensureIndexes(%s): %v", col, err)
+	applied, err := s.appliedVersions(ctx)
+	if err != nil {
+		return err
+	}
+
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	ran := 0
+	for _, name := range names {
+		version := strings.TrimSuffix(name, ".sql")
+		if applied[version] {
 			continue
 		}
-		logger.Info("Schema ready for collection %q", col)
+
+		sqlBytes, err := migrationFiles.ReadFile("migrations/" + name)
+		if err != nil {
+			return err
+		}
+
+		if err := s.applyMigration(ctx, version, string(sqlBytes)); err != nil {
+			return fmt.Errorf("migration %s: %w", version, err)
+		}
+		logger.Info("Applied migration %s", version)
+		ran++
 	}
 
+	if ran == 0 {
+		logger.Info("Schema up to date (%d migration(s) already applied)", len(applied))
+	} else {
+		logger.Info("Schema ready (%d migration(s) applied)", ran)
+	}
 	return nil
 }
 
-func (s *Store) Users() *mongo.Collection         { return s.DB.Collection(ColUsers) }
-func (s *Store) Teams() *mongo.Collection         { return s.DB.Collection(ColTeams) }
-func (s *Store) Projects() *mongo.Collection      { return s.DB.Collection(ColProjects) }
-func (s *Store) Tasks() *mongo.Collection         { return s.DB.Collection(ColTasks) }
-func (s *Store) ChatChannels() *mongo.Collection  { return s.DB.Collection(ColChatChannels) }
-func (s *Store) ChatMessages() *mongo.Collection  { return s.DB.Collection(ColChatMessages) }
-func (s *Store) Notifications() *mongo.Collection { return s.DB.Collection(ColNotifications) }
+func (s *Store) appliedVersions(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT version FROM schema_migrations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	applied := map[string]bool{}
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		applied[v] = true
+	}
+	return applied, rows.Err()
+}
+
+func (s *Store) applyMigration(ctx context.Context, version, script string) error {
+	return s.WithTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, script); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, version)
+		return err
+	})
+}
+
+// WithTx runs fn inside a transaction, committing on success and rolling back
+// on any error or panic. This is what the Mongo version could not offer:
+// deleting a project and everything under it is now one atomic statement set.
+func (s *Store) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Rollback after a successful commit is a no-op error we ignore.
+		_ = tx.Rollback(ctx)
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// DatabaseName reports the database the DSN points at, for log lines.
+func DatabaseName(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(u.Path, "/")
+}

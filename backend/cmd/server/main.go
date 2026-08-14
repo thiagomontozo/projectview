@@ -1,7 +1,8 @@
-// Command server boots the ProjectView API: it loads configuration,
-// connects to MongoDB (creating the schema on first run), seeds a default
-// admin/team/project if the database is empty, starts the deadline alert
-// scheduler, and serves the HTTP + WebSocket API.
+// Command server boots the ProjectView API: it loads configuration, connects
+// to PostgreSQL (applying the embedded migrations, which is how the schema is
+// created on first run), seeds a default admin/team/project if the database is
+// empty, starts the deadline alert scheduler, and serves the HTTP + WebSocket
+// API.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 
 	"projectview/internal/config"
 	"projectview/internal/db"
+	"projectview/internal/handlers"
 	"projectview/internal/logger"
 	"projectview/internal/router"
 	"projectview/internal/seed"
@@ -34,24 +36,26 @@ func main() {
 
 	store, err := db.Connect(cfg)
 	if err != nil {
-		logger.Error("failed to connect to MongoDB: %v", err)
+		logger.Error("failed to connect to PostgreSQL: %v", err)
 		os.Exit(1)
 	}
+	defer store.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	if err := seed.Run(ctx, store, cfg); err != nil {
+	hub := ws.NewHub()
+	api := handlers.New(store, cfg, hub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := seed.Run(ctx, api.Users, api.Teams, api.Projects, api.Chat, cfg); err != nil {
 		logger.Error("failed to seed database: %v", err)
 	}
 	cancel()
 
-	hub := ws.NewHub()
-
 	mailer := services.NewMailer(cfg)
-	notifier := services.NewNotifier(store, hub, mailer)
-	alertScheduler := services.NewAlertScheduler(store, cfg, notifier)
+	notifier := services.NewNotifier(api.Notifications, api.Users, hub, mailer)
+	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier)
 	alertScheduler.Start()
 
-	handler := router.New(store, cfg, hub)
+	handler := router.New(api, cfg, hub)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -79,7 +83,6 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
-	_ = store.Client.Disconnect(shutdownCtx)
 }
 
 func enabledLabel(enabled bool) string {

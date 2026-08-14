@@ -1,27 +1,32 @@
+// Package models holds the domain types shared by repositories and handlers.
+//
+// Identifiers are UUIDs. The JSON contract is unchanged from the document-store
+// era - ids were opaque strings to every client then, and still are - but the
+// database now enforces the relationships that used to live in arrays.
 package models
 
 import (
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 )
 
 type User struct {
-	ID            primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
-	Username      string               `bson:"username" json:"username"`
-	Name          string               `bson:"name" json:"name"`
-	Email         string               `bson:"email" json:"email"`
-	PasswordHash  string               `bson:"passwordHash,omitempty" json:"-"`
-	AuthSource    string               `bson:"authSource" json:"authSource"` // "local" | "ad"
-	Role          string               `bson:"role" json:"role"`             // "admin" | "manager" | "member"
-	Title         string               `bson:"title,omitempty" json:"title,omitempty"`
-	AvatarColor   string               `bson:"avatarColor" json:"avatarColor"`
-	Teams         []primitive.ObjectID `bson:"teams" json:"teams"`
-	Active        bool                 `bson:"active" json:"active"`
-	NotifyByEmail bool                 `bson:"notifyByEmail" json:"notifyByEmail"`
-	LastLoginAt   *time.Time           `bson:"lastLoginAt,omitempty" json:"lastLoginAt,omitempty"`
-	CreatedAt     time.Time            `bson:"createdAt" json:"createdAt"`
-	UpdatedAt     time.Time            `bson:"updatedAt" json:"updatedAt"`
+	ID            uuid.UUID   `json:"id"`
+	Username      string      `json:"username"`
+	Name          string      `json:"name"`
+	Email         string      `json:"email"`
+	PasswordHash  string      `json:"-"`
+	AuthSource    string      `json:"authSource"` // "local" | "ad"
+	Role          string      `json:"role"`       // "admin" | "manager" | "member"
+	Title         string      `json:"title,omitempty"`
+	AvatarColor   string      `json:"avatarColor"`
+	Teams         []uuid.UUID `json:"teams"`
+	Active        bool        `json:"active"`
+	NotifyByEmail bool        `json:"notifyByEmail"`
+	LastLoginAt   *time.Time  `json:"lastLoginAt,omitempty"`
+	CreatedAt     time.Time   `json:"createdAt"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
 }
 
 const (
@@ -32,3 +37,8 @@ const (
 	RoleManager = "manager"
 	RoleMember  = "member"
 )
+
+// ValidRole reports whether r is one of the three roles the schema accepts.
+func ValidRole(r string) bool {
+	return r == RoleAdmin || r == RoleManager || r == RoleMember
+}

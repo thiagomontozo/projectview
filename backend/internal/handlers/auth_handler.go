@@ -1,17 +1,17 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
 type loginRequest struct {
@@ -63,7 +63,7 @@ func (a *API) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	var user models.User
+	var user *models.User
 
 	if mode == "ad" {
 		profile, err := auth.AuthenticateAD(a.Cfg, req.Username, req.Password)
@@ -71,52 +71,23 @@ func (a *API) Login(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusUnauthorized, "Invalid Active Directory credentials.")
 			return
 		}
-
-		err = a.Store.Users().FindOne(ctx, bson.M{"email": profile.Email}).Decode(&user)
-		now := time.Now()
+		user, err = a.Users.UpsertFromAD(ctx, profile.Username, profile.Name, profile.Email, "#2a78d6")
 		if err != nil {
-			user = models.User{
-				ID:            primitive.NewObjectID(),
-				Username:      profile.Username,
-				Name:          profile.Name,
-				Email:         profile.Email,
-				AuthSource:    models.AuthSourceAD,
-				Role:          models.RoleMember,
-				AvatarColor:   "#2a78d6",
-				Teams:         []primitive.ObjectID{},
-				Active:        true,
-				NotifyByEmail: true,
-				LastLoginAt:   &now,
-				CreatedAt:     now,
-				UpdatedAt:     now,
-			}
-			if _, err := a.Store.Users().InsertOne(ctx, user); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "Failed to provision user.")
-				return
-			}
-		} else {
-			user.Name = profile.Name
-			user.AuthSource = models.AuthSourceAD
-			user.LastLoginAt = &now
-			user.UpdatedAt = now
-			_, _ = a.Store.Users().UpdateByID(ctx, user.ID, bson.M{"$set": bson.M{
-				"name": user.Name, "authSource": user.AuthSource, "lastLoginAt": now, "updatedAt": now,
-			}})
+			httpx.Error(w, http.StatusInternalServerError, "Failed to provision user.")
+			return
 		}
 	} else {
-		lookup := strings.ToLower(req.Username)
-		err := a.Store.Users().FindOne(ctx, bson.M{"$or": []bson.M{{"username": lookup}, {"email": lookup}}}).Decode(&user)
-		if err != nil || user.PasswordHash == "" {
+		found, err := a.Users.ByLogin(ctx, strings.ToLower(req.Username))
+		if err != nil || found.PasswordHash == "" {
 			httpx.Error(w, http.StatusUnauthorized, "Invalid username or password.")
 			return
 		}
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		if bcrypt.CompareHashAndPassword([]byte(found.PasswordHash), []byte(req.Password)) != nil {
 			httpx.Error(w, http.StatusUnauthorized, "Invalid username or password.")
 			return
 		}
-		now := time.Now()
-		user.LastLoginAt = &now
-		_, _ = a.Store.Users().UpdateByID(ctx, user.ID, bson.M{"$set": bson.M{"lastLoginAt": now, "updatedAt": now}})
+		_ = a.Users.TouchLogin(ctx, found.ID)
+		user = found
 	}
 
 	if !user.Active {
@@ -124,14 +95,14 @@ func (a *API) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.SignToken(a.Cfg, user.ID.Hex(), user.Role)
+	token, err := auth.SignToken(a.Cfg, user.ID.String(), user.Role)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "Failed to create session.")
 		return
 	}
 	a.setSessionCookie(w, token)
 	user.PasswordHash = ""
-	httpx.JSON(w, http.StatusOK, loginResponse{Token: token, User: user})
+	httpx.JSON(w, http.StatusOK, loginResponse{Token: token, User: *user})
 }
 
 type registerRequest struct {
@@ -145,7 +116,7 @@ type registerRequest struct {
 // POST /api/auth/register - creates a local account.
 //
 // Administrative endpoint: it mints accounts and can assign any role, so the
-// router gates it behind RequireAuth + RequireRole(admin). It was previously
+// router gates it behind RequireAuth + RequireRole(admin). It was once
 // reachable unauthenticated while honouring a caller-supplied "role", which
 // let anyone who could reach the API create themselves an administrator.
 func (a *API) Register(w http.ResponseWriter, r *http.Request) {
@@ -162,64 +133,57 @@ func (a *API) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	username := strings.ToLower(req.Username)
-	email := strings.ToLower(req.Email)
-
-	count, _ := a.Store.Users().CountDocuments(ctx, bson.M{"$or": []bson.M{{"username": username}, {"email": email}}})
-	if count > 0 {
-		httpx.Error(w, http.StatusConflict, "A user with that username or email already exists.")
-		return
+	// Only the three known roles are accepted. Anything else is rejected
+	// rather than silently downgraded, so a typo in an automation surfaces
+	// instead of quietly creating an under-privileged account.
+	role := models.RoleMember
+	if req.Role != "" {
+		if !models.ValidRole(req.Role) {
+			httpx.Error(w, http.StatusBadRequest, "Invalid role. Expected admin, manager or member.")
+			return
+		}
+		role = req.Role
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := hashPassword(req.Password)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "Failed to hash password.")
 		return
 	}
 
-	// Only the three known roles are accepted. Anything else is rejected
-	// rather than silently downgraded, so a typo in an automation surfaces
-	// instead of quietly creating an under-privileged account.
-	role := models.RoleMember
-	switch req.Role {
-	case "":
-	case models.RoleAdmin, models.RoleManager, models.RoleMember:
-		role = req.Role
-	default:
-		httpx.Error(w, http.StatusBadRequest, "Invalid role. Expected admin, manager or member.")
-		return
-	}
-
-	now := time.Now()
-	user := models.User{
-		ID:            primitive.NewObjectID(),
-		Username:      username,
+	user := &models.User{
+		Username:      strings.ToLower(req.Username),
 		Name:          req.Name,
-		Email:         email,
-		PasswordHash:  string(hash),
+		Email:         strings.ToLower(req.Email),
+		PasswordHash:  hash,
 		AuthSource:    models.AuthSourceLocal,
 		Role:          role,
 		AvatarColor:   "#2a78d6",
-		Teams:         []primitive.ObjectID{},
 		Active:        true,
 		NotifyByEmail: true,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
-	if _, err := a.Store.Users().InsertOne(ctx, user); err != nil {
+	if err := a.Users.Create(r.Context(), user); err != nil {
+		if repo.IsUniqueViolation(err) {
+			httpx.Error(w, http.StatusConflict, "A user with that username or email already exists.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "Failed to create user.")
 		return
 	}
+
 	user.PasswordHash = ""
+	// A brand-new account belongs to no team yet; keep it an empty array so
+	// the JSON stays [] rather than null, as clients expect.
+	user.Teams = []uuid.UUID{}
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{"user": user})
 }
 
 // GET /api/auth/me
 func (a *API) Me(w http.ResponseWriter, r *http.Request) {
 	user := auth.CurrentUser(r)
-	user.PasswordHash = ""
-	httpx.JSON(w, http.StatusOK, map[string]interface{}{"user": user})
+	copy := *user
+	copy.PasswordHash = ""
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"user": copy})
 }
 
 // POST /api/auth/logout
@@ -227,3 +191,6 @@ func (a *API) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "token", Value: "", Path: "/", MaxAge: -1})
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
+
+// notFound reports whether err means "no such row".
+func notFound(err error) bool { return errors.Is(err, repo.ErrNotFound) }

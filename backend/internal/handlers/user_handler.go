@@ -3,51 +3,36 @@ package handlers
 import (
 	"net/http"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 )
 
 // GET /api/users
 func (a *API) ListUsers(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	cursor, err := a.Store.Users().Find(ctx, bson.M{"active": true}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	users, err := a.Users.ListActive(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer cursor.Close(ctx)
-
-	users := []models.User{}
-	for cursor.Next(ctx) {
-		var u models.User
-		if err := cursor.Decode(&u); err != nil {
-			continue
-		}
-		u.PasswordHash = ""
-		users = append(users, u)
+	for i := range users {
+		users[i].PasswordHash = ""
 	}
 	httpx.JSON(w, http.StatusOK, users)
 }
 
 // GET /api/users/:id
 func (a *API) GetUser(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	var user models.User
-	err := a.Store.Users().FindOne(r.Context(), bson.M{"_id": id}).Decode(&user)
-	if err == mongo.ErrNoDocuments {
-		httpx.Error(w, http.StatusNotFound, "User not found.")
-		return
-	} else if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	user, err := a.Users.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "User not found.")
 		return
 	}
 	user.PasswordHash = ""
@@ -65,10 +50,11 @@ type updateUserRequest struct {
 
 // PUT /api/users/:id
 func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
+
 	requester := auth.CurrentUser(r)
 	if !canEditUser(id, requester) {
 		httpx.Error(w, http.StatusForbidden, "You can only edit your own profile.")
@@ -80,37 +66,32 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	set := bson.M{}
-	if req.Name != nil {
-		set["name"] = *req.Name
+	patch := repo.UserPatch{
+		Name:          req.Name,
+		Title:         req.Title,
+		AvatarColor:   req.AvatarColor,
+		NotifyByEmail: req.NotifyByEmail,
 	}
-	if req.Title != nil {
-		set["title"] = *req.Title
-	}
-	if req.AvatarColor != nil {
-		set["avatarColor"] = *req.AvatarColor
-	}
-	if req.NotifyByEmail != nil {
-		set["notifyByEmail"] = *req.NotifyByEmail
-	}
-	if requester.Role == models.RoleAdmin {
+	// Role and activation are administrative, even on your own account.
+	if isAdmin(requester) {
 		if req.Role != nil {
-			set["role"] = *req.Role
+			if !models.ValidRole(*req.Role) {
+				httpx.Error(w, http.StatusBadRequest, "Invalid role.")
+				return
+			}
+			patch.Role = req.Role
 		}
-		if req.Active != nil {
-			set["active"] = *req.Active
-		}
+		patch.Active = req.Active
 	}
 
-	_, err := a.Store.Users().UpdateByID(r.Context(), id, bson.M{"$set": set})
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if err := a.Users.Update(r.Context(), id, patch); err != nil {
+		respondRepoError(w, err, "User not found.")
 		return
 	}
 
-	var user models.User
-	if err := a.Store.Users().FindOne(r.Context(), bson.M{"_id": id}).Decode(&user); err != nil {
-		httpx.Error(w, http.StatusNotFound, "User not found.")
+	user, err := a.Users.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "User not found.")
 		return
 	}
 	user.PasswordHash = ""
@@ -136,11 +117,10 @@ const (
 //   - Administrative reset: an admin sets someone else's password without
 //     knowing the old one.
 //
-// Anything else is refused. This endpoint previously performed no check at
-// all, so any authenticated account could overwrite the administrator's
-// password and take over the installation.
+// Anything else is refused. This endpoint once performed no check at all, so
+// any authenticated account could overwrite the administrator's password.
 func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	id, ok := httpx.ObjectIDParam(w, r, "id")
+	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
@@ -178,12 +158,8 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	_, err = a.Store.Users().UpdateByID(r.Context(), id, bson.M{"$set": bson.M{
-		"passwordHash": hash, "authSource": models.AuthSourceLocal,
-	}})
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
+	if err := a.Users.SetPassword(r.Context(), id, hash); err != nil {
+		respondRepoError(w, err, "User not found.")
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -199,81 +175,22 @@ type workloadRow struct {
 
 // GET /api/users/workload - resource allocation view: workload per user.
 func (a *API) Workload(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	cursor, err := a.Store.Users().Find(ctx, bson.M{"active": true})
+	rows, err := a.Users.Workload(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer cursor.Close(ctx)
-
-	rows := map[string]*workloadRow{}
-	order := []string{}
-	for cursor.Next(ctx) {
-		var u models.User
-		if err := cursor.Decode(&u); err != nil {
-			continue
-		}
-		u.PasswordHash = ""
-		rows[u.ID.Hex()] = &workloadRow{User: u}
-		order = append(order, u.ID.Hex())
+	out := make([]workloadRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, workloadRow{
+			User:          row.User,
+			OpenTasks:     row.OpenTasks,
+			EstimateHours: row.EstimateHours,
+			Overdue:       row.Overdue,
+			ProjectCount:  row.ProjectCount,
+		})
 	}
-
-	pipeline := mongo.Pipeline{
-		bson.D{{Key: "$match", Value: bson.M{"status": bson.M{"$ne": "done"}}}},
-		bson.D{{Key: "$unwind", Value: "$assignees"}},
-		bson.D{{Key: "$group", Value: bson.M{
-			"_id":           "$assignees",
-			"openTasks":     bson.M{"$sum": 1},
-			"estimateHours": bson.M{"$sum": bson.M{"$ifNull": []interface{}{"$estimateHours", 0}}},
-			"overdue": bson.M{"$sum": bson.M{"$cond": []interface{}{
-				bson.M{"$and": []interface{}{
-					bson.M{"$ne": []interface{}{"$dueDate", nil}},
-					bson.M{"$lt": []interface{}{"$dueDate", "$$NOW"}},
-				}}, 1, 0,
-			}}},
-			"projects": bson.M{"$addToSet": "$project"},
-		}}},
-	}
-
-	agg, err := a.Store.Tasks().Aggregate(ctx, pipeline)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer agg.Close(ctx)
-
-	type aggRow struct {
-		ID            interface{}   `bson:"_id"`
-		OpenTasks     int64         `bson:"openTasks"`
-		EstimateHours float64       `bson:"estimateHours"`
-		Overdue       int64         `bson:"overdue"`
-		Projects      []interface{} `bson:"projects"`
-	}
-
-	for agg.Next(ctx) {
-		var ar aggRow
-		if err := agg.Decode(&ar); err != nil {
-			continue
-		}
-		oid, ok := ar.ID.(interface{ Hex() string })
-		if !ok {
-			continue
-		}
-		if row, exists := rows[oid.Hex()]; exists {
-			row.OpenTasks = ar.OpenTasks
-			row.EstimateHours = ar.EstimateHours
-			row.Overdue = ar.Overdue
-			row.ProjectCount = len(ar.Projects)
-		}
-	}
-
-	result := make([]*workloadRow, 0, len(order))
-	for _, hex := range order {
-		result = append(result, rows[hex])
-	}
-	httpx.JSON(w, http.StatusOK, result)
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func hashPassword(pw string) (string, error) {

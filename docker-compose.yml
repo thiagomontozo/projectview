@@ -19,25 +19,24 @@ services:
       - '${PROXY_HTTP_PORT:-80}:80'
       - '${PROXY_HTTPS_PORT:-443}:443'
 
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      # Set these to enable auth on the MongoDB container itself. Leave
-      # unset for a quick local/dev start with no DB auth.
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+      POSTGRES_USER: ${POSTGRES_USER:-projectview}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-projectview}
+      POSTGRES_DB: ${POSTGRES_DB:-projectview}
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      # Bound to loopback: reachable with a local mongosh for inspection,
+      # Bound to loopback: reachable with a local psql for inspection,
       # never exposed to the network.
-      - '127.0.0.1:${MONGO_PORT:-27017}:27017'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-projectview} -d ${POSTGRES_DB:-projectview}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   backend:
     build:
@@ -50,9 +49,11 @@ services:
     # exists (Compose loads it automatically) and falls back to a working
     # default otherwise, so "docker compose up" works on a fresh clone.
     environment:
-      # --- MongoDB (fully configurable) ---
-      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/pm_dashboard}
-      MONGO_DB_NAME: ${MONGO_DB_NAME:-}
+      # --- PostgreSQL (fully configurable) ---
+      # The schema is created automatically on first boot by the migrations
+      # embedded in the binary.
+      DATABASE_URL: ${DATABASE_URL:-postgres://projectview:projectview@postgres:5432/projectview?sslmode=disable}
+      DATABASE_MAX_CONNS: ${DATABASE_MAX_CONNS:-10}
       # --- Sessions ---
       JWT_SECRET: ${JWT_SECRET:-please-change-this-to-a-long-random-string}
       JWT_EXPIRES_IN_HOURS: ${JWT_EXPIRES_IN_HOURS:-8}
@@ -88,7 +89,7 @@ services:
       # Marks session cookies "secure"; safe because the proxy serves HTTPS.
       NODE_ENV: production
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
     # Not published: reachable only through the proxy, on the internal network.
     expose:
@@ -113,4 +114,4 @@ services:
       - '80'
 
 volumes:
-  mongo_data:
+  postgres_data:

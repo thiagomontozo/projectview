@@ -1,6 +1,6 @@
 # Builds the self-signed-certificate helper as a static binary, so the final
 # image needs no package manager (the nginx alpine base has no openssl CLI).
-FROM golang:1.24-alpine AS gencert
+FROM golang:1.25-alpine AS gencert
 WORKDIR /src
 COPY gencert/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /gencert .

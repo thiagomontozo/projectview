@@ -2,16 +2,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
 
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
+	"projectview/internal/repo"
 	"projectview/internal/ws"
 )
 
@@ -22,49 +21,53 @@ type chatChannelResponse struct {
 	Team    *teamRef        `json:"team,omitempty"`
 }
 
-func (a *API) populateChannel(ctx context.Context, ch models.ChatChannel) chatChannelResponse {
-	users, _ := a.usersByID(ctx, uniqueIDs(ch.Members))
-	resp := chatChannelResponse{ChatChannel: ch, Members: []PublicUser{}}
-	for _, m := range ch.Members {
-		if u, ok := users[m]; ok {
-			resp.Members = append(resp.Members, u)
+func (a *API) populateChannels(ctx context.Context, channels []models.ChatChannel) []chatChannelResponse {
+	userIDs := []uuid.UUID{}
+	for _, c := range channels {
+		userIDs = append(userIDs, c.Members...)
+	}
+	users := a.usersByID(ctx, uniqueIDs(userIDs))
+
+	projects := map[uuid.UUID]projectRefLite{}
+	if all, err := a.Projects.List(ctx); err == nil {
+		for _, p := range all {
+			projects[p.ID] = projectRefLite{ID: p.ID, Name: p.Name, Key: p.Key, Color: p.Color}
 		}
 	}
-	if ch.Project != nil {
-		var p models.Project
-		if err := a.Store.Projects().FindOne(ctx, bson.M{"_id": *ch.Project}).Decode(&p); err == nil {
-			resp.Project = &projectRefLite{ID: p.ID, Name: p.Name, Key: p.Key, Color: p.Color}
+	teams := map[uuid.UUID]teamRef{}
+	if all, err := a.Teams.List(ctx); err == nil {
+		for _, t := range all {
+			teams[t.ID] = teamRef{ID: t.ID, Name: t.Name, Color: t.Color}
 		}
 	}
-	if ch.Team != nil {
-		var t models.Team
-		if err := a.Store.Teams().FindOne(ctx, bson.M{"_id": *ch.Team}).Decode(&t); err == nil {
-			resp.Team = &teamRef{ID: t.ID, Name: t.Name, Color: t.Color}
+
+	out := make([]chatChannelResponse, 0, len(channels))
+	for _, c := range channels {
+		resp := chatChannelResponse{ChatChannel: c, Members: publicList(users, c.Members)}
+		if c.ProjectID != nil {
+			if p, ok := projects[*c.ProjectID]; ok {
+				resp.Project = &p
+			}
 		}
+		if c.TeamID != nil {
+			if t, ok := teams[*c.TeamID]; ok {
+				resp.Team = &t
+			}
+		}
+		out = append(out, resp)
 	}
-	return resp
+	return out
 }
 
 // GET /api/chat/channels - channels the current user is a member of.
 func (a *API) ListChannels(w http.ResponseWriter, r *http.Request) {
 	user := auth.CurrentUser(r)
-	ctx := r.Context()
-	cursor, err := a.Store.ChatChannels().Find(ctx, bson.M{"members": user.ID}, options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}))
+	channels, err := a.Chat.ChannelsForUser(r.Context(), user.ID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer cursor.Close(ctx)
-
-	channels := []chatChannelResponse{}
-	for cursor.Next(ctx) {
-		var ch models.ChatChannel
-		if err := cursor.Decode(&ch); err != nil {
-			continue
-		}
-		channels = append(channels, a.populateChannel(ctx, ch))
-	}
-	httpx.JSON(w, http.StatusOK, channels)
+	httpx.JSON(w, http.StatusOK, a.populateChannels(r.Context(), channels))
 }
 
 type createChannelRequest struct {
@@ -81,106 +84,73 @@ func (a *API) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	if req.Type == "" {
-		httpx.Error(w, http.StatusBadRequest, "Channel type is required.")
+	if !models.ValidChannelType(req.Type) {
+		httpx.Error(w, http.StatusBadRequest, "Channel type must be team, project or dm.")
 		return
 	}
 
 	requester := auth.CurrentUser(r)
 	ctx := r.Context()
-	members := uniqueIDs(append(httpx.ObjectIDs(req.MemberIDs), requester.ID))
+	members := uniqueIDs(httpx.UUIDs(req.MemberIDs), []uuid.UUID{requester.ID})
 
-	if req.Type == "dm" {
-		var existing models.ChatChannel
-		err := a.Store.ChatChannels().FindOne(ctx, bson.M{
-			"type":    "dm",
-			"members": bson.M{"$all": members, "$size": len(members)},
-		}).Decode(&existing)
-		if err == nil {
-			httpx.JSON(w, http.StatusCreated, a.populateChannel(ctx, existing))
+	// Opening the same direct message twice reuses the existing conversation.
+	if req.Type == models.ChannelTypeDM {
+		if existing, err := a.Chat.FindDM(ctx, members); err == nil {
+			httpx.JSON(w, http.StatusCreated, a.populateChannels(ctx, []models.ChatChannel{*existing})[0])
 			return
-		}
-
-		now := time.Now()
-		channel := models.ChatChannel{
-			ID: primitive.NewObjectID(), Type: "dm", Members: members,
-			CreatedBy: requester.ID, CreatedAt: now, UpdatedAt: now,
-		}
-		if _, err := a.Store.ChatChannels().InsertOne(ctx, channel); err != nil {
+		} else if !errors.Is(err, repo.ErrNotFound) {
 			httpx.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		httpx.JSON(w, http.StatusCreated, a.populateChannel(ctx, channel))
-		return
 	}
 
-	now := time.Now()
-	channel := models.ChatChannel{
-		ID: primitive.NewObjectID(), Name: req.Name, Type: req.Type, Members: members,
-		CreatedBy: requester.ID, CreatedAt: now, UpdatedAt: now,
+	channel := &models.ChatChannel{
+		ID: uuid.New(), Name: req.Name, Type: req.Type,
+		Members: members, CreatedBy: &requester.ID,
 	}
-	if req.Team != "" {
-		if id, err := primitive.ObjectIDFromHex(req.Team); err == nil {
-			channel.Team = &id
-		}
+	if teamID, ok := httpx.OptionalUUID(req.Team); ok && teamID != nil {
+		channel.TeamID = teamID
 	}
-	if req.Project != "" {
-		if id, err := primitive.ObjectIDFromHex(req.Project); err == nil {
-			channel.Project = &id
-		}
+	if projectID, ok := httpx.OptionalUUID(req.Project); ok && projectID != nil {
+		channel.ProjectID = projectID
 	}
-	if _, err := a.Store.ChatChannels().InsertOne(ctx, channel); err != nil {
+
+	if err := a.Chat.CreateChannel(ctx, channel); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, a.populateChannel(ctx, channel))
+	httpx.JSON(w, http.StatusCreated, a.populateChannels(ctx, []models.ChatChannel{*channel})[0])
 }
 
 // GET /api/chat/channels/:channelId/messages
 //
-// Membership is enforced with the same filter PostMessage uses. Without it any
-// authenticated user could read any conversation by guessing a channel id,
-// direct messages included.
+// Membership is part of the query, not a separate check that could be
+// forgotten: without it any authenticated user could read any conversation by
+// guessing a channel id, direct messages included.
 func (a *API) GetMessages(w http.ResponseWriter, r *http.Request) {
-	channelID, ok := httpx.ObjectIDParam(w, r, "channelId")
+	channelID, ok := httpx.UUIDParam(w, r, "channelId")
 	if !ok {
 		return
 	}
 	ctx := r.Context()
-
 	requester := auth.CurrentUser(r)
-	var channel models.ChatChannel
-	if err := a.Store.ChatChannels().FindOne(ctx, bson.M{"_id": channelID, "members": requester.ID}).Decode(&channel); err != nil {
+
+	if _, err := a.Chat.ChannelForMember(ctx, channelID, requester.ID); err != nil {
 		httpx.Error(w, http.StatusForbidden, "Not a member of this channel.")
 		return
 	}
 
-	cursor, err := a.Store.ChatMessages().Find(ctx, bson.M{"channel": channelID},
-		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100))
+	messages, err := a.Chat.Messages(ctx, channelID, 100)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer cursor.Close(ctx)
 
-	messages := []models.ChatMessage{}
-	for cursor.Next(ctx) {
-		var m models.ChatMessage
-		if err := cursor.Decode(&m); err != nil {
-			continue
-		}
-		messages = append(messages, m)
-	}
-	// Reverse to chronological order (oldest first), then populate authors.
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
-	}
-
-	authorIDs := make([]primitive.ObjectID, 0, len(messages))
+	authorIDs := []uuid.UUID{}
 	for _, m := range messages {
-		authorIDs = append(authorIDs, m.Author)
+		authorIDs = append(authorIDs, derefIDs(m.Author)...)
 	}
-	users, _ := a.usersByID(ctx, uniqueIDs(authorIDs))
+	users := a.usersByID(ctx, uniqueIDs(authorIDs))
 
 	type messageResponse struct {
 		models.ChatMessage
@@ -189,12 +159,13 @@ func (a *API) GetMessages(w http.ResponseWriter, r *http.Request) {
 	out := make([]messageResponse, 0, len(messages))
 	for _, m := range messages {
 		mr := messageResponse{ChatMessage: m}
-		if u, ok := users[m.Author]; ok {
-			mr.Author = &u
+		if m.Author != nil {
+			if u, ok := users[*m.Author]; ok {
+				mr.Author = &u
+			}
 		}
 		out = append(out, mr)
 	}
-
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -203,9 +174,9 @@ type postMessageRequest struct {
 }
 
 // POST /api/chat/channels/:channelId/messages - persists the message and
-// pushes it over the WebSocket hub to every other channel member.
+// pushes it over the WebSocket hub to every channel member.
 func (a *API) PostMessage(w http.ResponseWriter, r *http.Request) {
-	channelID, ok := httpx.ObjectIDParam(w, r, "channelId")
+	channelID, ok := httpx.UUIDParam(w, r, "channelId")
 	if !ok {
 		return
 	}
@@ -218,36 +189,34 @@ func (a *API) PostMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requester := auth.CurrentUser(r)
 	ctx := r.Context()
+	requester := auth.CurrentUser(r)
 
-	var channel models.ChatChannel
-	if err := a.Store.ChatChannels().FindOne(ctx, bson.M{"_id": channelID, "members": requester.ID}).Decode(&channel); err != nil {
+	channel, err := a.Chat.ChannelForMember(ctx, channelID, requester.ID)
+	if err != nil {
 		httpx.Error(w, http.StatusForbidden, "Not a member of this channel.")
 		return
 	}
 
-	now := time.Now()
-	message := models.ChatMessage{
-		ID: primitive.NewObjectID(), Channel: channelID, Author: requester.ID, Body: req.Body,
-		ReadBy: []primitive.ObjectID{requester.ID}, CreatedAt: now, UpdatedAt: now,
-	}
-	if _, err := a.Store.ChatMessages().InsertOne(ctx, message); err != nil {
+	message, err := a.Chat.PostMessage(ctx, channelID, requester.ID, req.Body)
+	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_, _ = a.Store.ChatChannels().UpdateByID(ctx, channelID, bson.M{"$set": bson.M{"updatedAt": now}})
 
-	author := PublicUser{ID: requester.ID, Name: requester.Name, Email: requester.Email, AvatarColor: requester.AvatarColor}
+	author := PublicUser{
+		ID: requester.ID, Name: requester.Name,
+		Email: requester.Email, AvatarColor: requester.AvatarColor,
+	}
 	payload := struct {
 		models.ChatMessage
 		Author PublicUser `json:"author"`
-	}{ChatMessage: message, Author: author}
+	}{ChatMessage: *message, Author: author}
 
 	if a.Hub != nil {
 		memberIDs := make([]string, 0, len(channel.Members))
 		for _, m := range channel.Members {
-			memberIDs = append(memberIDs, m.Hex())
+			memberIDs = append(memberIDs, m.String())
 		}
 		a.Hub.SendToUsers(memberIDs, ws.Message{Type: "chat:message", Payload: payload})
 	}
