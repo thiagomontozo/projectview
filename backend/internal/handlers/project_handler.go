@@ -112,6 +112,11 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requester := auth.CurrentUser(r)
+	if !canAdministerStructure(requester) {
+		httpx.Error(w, http.StatusForbidden, "Only managers and administrators can create projects.")
+		return
+	}
+
 	color := req.Color
 	if color == "" {
 		color = "#8b5cf6"
@@ -125,14 +130,16 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		Color:       color,
 		Status:      "planning",
-		Members:     httpx.ObjectIDs(req.MemberIDs),
-		Owner:       requester.ID,
-		StartDate:   req.StartDate,
-		EndDate:     req.EndDate,
-		Statuses:    models.DefaultStatuses(),
-		CreatedBy:   requester.ID,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		// The owner is mirrored into Members so membership checks, member
+		// counts and the project chat channel all agree on who belongs here.
+		Members:   uniqueIDs([]primitive.ObjectID{requester.ID}, httpx.ObjectIDs(req.MemberIDs)),
+		Owner:     requester.ID,
+		StartDate: req.StartDate,
+		EndDate:   req.EndDate,
+		Statuses:  models.DefaultStatuses(),
+		CreatedBy: requester.ID,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if req.Team != "" {
 		if teamID, err := primitive.ObjectIDFromHex(req.Team); err == nil {
@@ -147,14 +154,13 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-create a project chat channel so internal chat is ready immediately.
-	members := append([]primitive.ObjectID{requester.ID}, project.Members...)
 	channel := models.ChatChannel{
 		ID:        primitive.NewObjectID(),
 		Name:      "# " + project.Name,
 		Type:      "project",
 		Project:   &project.ID,
 		Team:      project.Team,
-		Members:   uniqueIDs(members),
+		Members:   project.Members,
 		CreatedBy: requester.ID,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -167,21 +173,97 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, a.populateProject(ctx, project))
 }
 
+// updateProjectRequest is an explicit allow-list. The handler previously
+// decoded into a map and passed it straight to $set, which let a caller
+// rewrite any field at all - reassigning "owner" to themselves, forging
+// "createdAt", or injecting keys outside the schema.
+type updateProjectRequest struct {
+	Name        *string                 `json:"name"`
+	Description *string                 `json:"description"`
+	Color       *string                 `json:"color"`
+	Status      *string                 `json:"status"`
+	Team        *string                 `json:"team"`
+	MemberIDs   *[]string               `json:"memberIds"`
+	StartDate   *time.Time              `json:"startDate"`
+	EndDate     *time.Time              `json:"endDate"`
+	Statuses    *[]models.ProjectStatus `json:"statuses"`
+}
+
+var validProjectStatuses = map[string]bool{
+	"planning": true, "active": true, "on_hold": true, "completed": true, "archived": true,
+}
+
 // PUT /api/projects/:id
 func (a *API) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	var req map[string]interface{}
+	project, ok := a.requireProjectManage(w, r, id)
+	if !ok {
+		return
+	}
+
+	var req updateProjectRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	delete(req, "id")
-	delete(req, "_id")
-	req["updatedAt"] = time.Now()
 
-	_, err := a.Store.Projects().UpdateByID(r.Context(), id, bson.M{"$set": req})
+	set := bson.M{"updatedAt": time.Now()}
+	if req.Name != nil {
+		if *req.Name == "" {
+			httpx.Error(w, http.StatusBadRequest, "Project name cannot be empty.")
+			return
+		}
+		set["name"] = *req.Name
+	}
+	if req.Description != nil {
+		set["description"] = *req.Description
+	}
+	if req.Color != nil {
+		set["color"] = *req.Color
+	}
+	if req.Status != nil {
+		if !validProjectStatuses[*req.Status] {
+			httpx.Error(w, http.StatusBadRequest, "Invalid project status.")
+			return
+		}
+		set["status"] = *req.Status
+	}
+	if req.Team != nil {
+		if *req.Team == "" {
+			set["team"] = nil
+		} else if teamID, err := primitive.ObjectIDFromHex(*req.Team); err == nil {
+			set["team"] = teamID
+		} else {
+			httpx.Error(w, http.StatusBadRequest, "Invalid team id.")
+			return
+		}
+	}
+	if req.MemberIDs != nil {
+		// The owner always stays a member; otherwise they could edit
+		// themselves out of their own project and lose access to it.
+		set["members"] = uniqueIDs([]primitive.ObjectID{project.Owner}, httpx.ObjectIDs(*req.MemberIDs))
+	}
+	if req.StartDate != nil {
+		set["startDate"] = *req.StartDate
+	}
+	if req.EndDate != nil {
+		set["endDate"] = *req.EndDate
+	}
+	if req.Statuses != nil {
+		if len(*req.Statuses) == 0 {
+			httpx.Error(w, http.StatusBadRequest, "A project needs at least one status column.")
+			return
+		}
+		set["statuses"] = *req.Statuses
+	}
+
+	// "key" and "owner" are intentionally absent: the key is the project's
+	// stable identifier and ownership transfer deserves its own audited
+	// endpoint rather than riding along in a generic update.
+
+	_, err := a.Store.Projects().UpdateByID(r.Context(), id, bson.M{"$set": set})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -198,6 +280,9 @@ func (a *API) UpdateProject(w http.ResponseWriter, r *http.Request) {
 func (a *API) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
+		return
+	}
+	if _, ok := a.requireProjectManage(w, r, id); !ok {
 		return
 	}
 	ctx := r.Context()

@@ -100,6 +100,11 @@ func (a *API) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requester := auth.CurrentUser(r)
+	if !canAdministerStructure(requester) {
+		httpx.Error(w, http.StatusForbidden, "Only managers and administrators can create teams.")
+		return
+	}
+
 	color := req.Color
 	if color == "" {
 		color = "#0ea5e9"
@@ -133,21 +138,60 @@ func (a *API) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, a.populateTeam(ctx, team))
 }
 
+// updateTeamRequest is an explicit allow-list, for the same reason as
+// updateProjectRequest: the previous map-into-$set accepted any field.
+type updateTeamRequest struct {
+	Name        *string   `json:"name"`
+	Description *string   `json:"description"`
+	Color       *string   `json:"color"`
+	LeadID      *string   `json:"leadId"`
+	MemberIDs   *[]string `json:"memberIds"`
+}
+
 // PUT /api/teams/:id
 func (a *API) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	var req map[string]interface{}
+	if _, ok := a.requireTeamManage(w, r, id); !ok {
+		return
+	}
+
+	var req updateTeamRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	delete(req, "id")
-	delete(req, "_id")
-	req["updatedAt"] = time.Now()
 
-	_, err := a.Store.Teams().UpdateByID(r.Context(), id, bson.M{"$set": req})
+	set := bson.M{"updatedAt": time.Now()}
+	if req.Name != nil {
+		if *req.Name == "" {
+			httpx.Error(w, http.StatusBadRequest, "Team name cannot be empty.")
+			return
+		}
+		set["name"] = *req.Name
+	}
+	if req.Description != nil {
+		set["description"] = *req.Description
+	}
+	if req.Color != nil {
+		set["color"] = *req.Color
+	}
+	if req.LeadID != nil {
+		if *req.LeadID == "" {
+			set["leadId"] = nil
+		} else if leadID, err := primitive.ObjectIDFromHex(*req.LeadID); err == nil {
+			set["leadId"] = leadID
+		} else {
+			httpx.Error(w, http.StatusBadRequest, "Invalid leadId.")
+			return
+		}
+	}
+	if req.MemberIDs != nil {
+		set["members"] = httpx.ObjectIDs(*req.MemberIDs)
+	}
+
+	_, err := a.Store.Teams().UpdateByID(r.Context(), id, bson.M{"$set": set})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -166,6 +210,10 @@ func (a *API) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !isAdmin(auth.CurrentUser(r)) {
+		httpx.Error(w, http.StatusForbidden, "Only administrators can delete teams.")
+		return
+	}
 	_, err := a.Store.Teams().DeleteOne(r.Context(), bson.M{"_id": id})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
@@ -182,6 +230,9 @@ type memberRequest struct {
 func (a *API) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
+		return
+	}
+	if _, ok := a.requireTeamManage(w, r, id); !ok {
 		return
 	}
 	var req memberRequest
@@ -215,6 +266,9 @@ func (a *API) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, ok := httpx.ObjectIDParam(w, r, "userId")
 	if !ok {
+		return
+	}
+	if _, ok := a.requireTeamManage(w, r, id); !ok {
 		return
 	}
 

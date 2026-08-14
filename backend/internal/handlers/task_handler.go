@@ -211,11 +211,11 @@ func (a *API) createTask(w http.ResponseWriter, r *http.Request, req createTaskR
 	}
 
 	ctx := r.Context()
-	var project models.Project
-	if err := a.Store.Projects().FindOne(ctx, bson.M{"_id": projectID}).Decode(&project); err != nil {
-		httpx.Error(w, http.StatusNotFound, "Project not found.")
+	projectPtr, ok := a.requireProjectWork(w, r, projectID)
+	if !ok {
 		return
 	}
+	project := *projectPtr
 
 	status := req.Status
 	if status == "" && len(project.Statuses) > 0 {
@@ -316,11 +316,11 @@ func (a *API) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	var existing models.Task
-	if err := a.Store.Tasks().FindOne(ctx, bson.M{"_id": id}).Decode(&existing); err != nil {
-		httpx.Error(w, http.StatusNotFound, "Task not found.")
+	existingPtr, _, ok := a.requireTaskWork(w, r, id)
+	if !ok {
 		return
 	}
+	existing := *existingPtr
 	previousAssignees := map[primitive.ObjectID]bool{}
 	for _, assigneeID := range existing.Assignees {
 		previousAssignees[assigneeID] = true
@@ -416,6 +416,9 @@ func (a *API) MoveTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, _, ok := a.requireTaskWork(w, r, id); !ok {
+		return
+	}
 	var req moveTaskRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
@@ -457,6 +460,9 @@ func (a *API) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, _, ok := a.requireTaskWork(w, r, id); !ok {
+		return
+	}
 	ctx := r.Context()
 	if _, err := a.Store.Tasks().DeleteOne(ctx, bson.M{"_id": id}); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
@@ -474,6 +480,9 @@ type addCommentRequest struct {
 func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
+		return
+	}
+	if _, _, ok := a.requireTaskWork(w, r, id); !ok {
 		return
 	}
 	var req addCommentRequest

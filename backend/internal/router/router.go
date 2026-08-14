@@ -11,8 +11,13 @@ import (
 	"projectview/internal/config"
 	"projectview/internal/db"
 	"projectview/internal/handlers"
+	"projectview/internal/models"
 	"projectview/internal/ws"
 )
+
+// Authorization note: beyond the role gates wired below, per-resource rules
+// (project membership, team leadership, self-vs-admin) are enforced inside the
+// handlers, where the target document is available. See handlers/access.go.
 
 func New(store *db.Store, cfg *config.Config, hub *ws.Hub) http.Handler {
 	api := handlers.New(store, cfg, hub)
@@ -32,15 +37,17 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub) http.Handler {
 	// Realtime push channel (auth via ?token=, see handlers.ServeWS).
 	r.Get("/ws", api.ServeWS)
 
+	requireAuth := auth.RequireAuth(store, cfg)
+
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Get("/config", api.AuthConfig)
 		r.Post("/login", api.Login)
-		r.Post("/register", api.Register)
 		r.Post("/logout", api.Logout)
-		r.With(auth.RequireAuth(store, cfg)).Get("/me", api.Me)
+		r.With(requireAuth).Get("/me", api.Me)
+		// Account creation mints accounts and assigns roles, so it is an
+		// administrative action - never an anonymous one.
+		r.With(requireAuth, auth.RequireRole(models.RoleAdmin)).Post("/register", api.Register)
 	})
-
-	requireAuth := auth.RequireAuth(store, cfg)
 
 	r.Route("/api/users", func(r chi.Router) {
 		r.Use(requireAuth)

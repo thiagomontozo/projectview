@@ -173,6 +173,35 @@ To use a real certificate, drop `fullchain.pem` and `privkey.pem` into
 `proxy/certs/` (gitignored) and restart the proxy. `/.well-known/acme-challenge/`
 stays reachable over plain HTTP for Let's Encrypt http-01 challenges.
 
+## Authorization model
+
+Authentication proves *who* is calling; these rules decide *what* they may do.
+They are enforced in [backend/internal/handlers/access.go](backend/internal/handlers/access.go),
+where the target document is available, and gated by role in
+[the router](backend/internal/router/router.go).
+
+| Action | Who |
+|---|---|
+| Create accounts, assign roles, deactivate users | `admin` |
+| Reset someone else's password | `admin` |
+| Change your own password | You, **proving the current password** |
+| Edit a user profile | The user themselves, or an `admin` |
+| Create projects and teams | `admin`, `manager` |
+| Create/edit/move/delete tasks, comment | Project members (owner counts), or `admin` |
+| Rename, reconfigure or delete a project | Project owner, a `manager` who is a member, or `admin` |
+| Delete a team | `admin` |
+| Edit a team, add/remove its members | Team lead, or `admin` |
+| Read or post in a chat channel | Channel members only |
+
+Reads of projects, tasks and teams are open to any authenticated user: this is
+an internal tool where work is meant to be visible across the organization.
+Chat is the exception, since it carries private conversation.
+
+The predicates are pure functions of the loaded documents, so the whole
+role × resource × action matrix is unit-tested without a database
+([access_test.go](backend/internal/handlers/access_test.go)), and the smoke
+test re-proves each boundary against a live stack as an ordinary member.
+
 ## Active Directory login
 
 Set in `.env`:
@@ -252,12 +281,18 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-53 assertions covering the proxy (HTTPS redirect, security headers, the
+75 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication, the first-run
 schema and seed, projects/tasks/sub-tasks with resource allocation and dates,
 the kanban move and its `completedAt` handling, the dashboard aggregations,
 chat, the WebSocket upgrade, and the login rate limit. It cleans up the
 fixtures it creates.
+
+21 of those assertions are **authorization regression tests**: the script
+creates an ordinary member account and proves it cannot take over another
+account, read a channel it does not belong to, create projects or teams, or
+touch a project it is not a member of — while confirming it still can do the
+things a member legitimately should.
 
 ## CI/CD
 

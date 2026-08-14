@@ -69,12 +69,17 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	requester := auth.CurrentUser(r)
+	if !canEditUser(id, requester) {
+		httpx.Error(w, http.StatusForbidden, "You can only edit your own profile.")
+		return
+	}
+
 	var req updateUserRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
 
-	requester := auth.CurrentUser(r)
 	set := bson.M{}
 	if req.Name != nil {
 		set["name"] = *req.Name
@@ -113,22 +118,59 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type changePasswordRequest struct {
-	Password string `json:"password"`
+	CurrentPassword string `json:"currentPassword"`
+	Password        string `json:"password"`
 }
 
+const (
+	minPasswordLength  = 8
+	minPasswordMessage = "Password must be at least 8 characters."
+)
+
 // POST /api/users/:id/password
+//
+// Two distinct flows share this endpoint:
+//
+//   - Self-service: you must prove possession of the current password, so a
+//     stolen session cannot lock the real owner out of their own account.
+//   - Administrative reset: an admin sets someone else's password without
+//     knowing the old one.
+//
+// Anything else is refused. This endpoint previously performed no check at
+// all, so any authenticated account could overwrite the administrator's
+// password and take over the installation.
 func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.ObjectIDParam(w, r, "id")
 	if !ok {
 		return
 	}
+
+	requester := auth.CurrentUser(r)
+	isSelf := requester != nil && requester.ID == id
+	if !isSelf && !isAdmin(requester) {
+		httpx.Error(w, http.StatusForbidden, "You can only change your own password.")
+		return
+	}
+
 	var req changePasswordRequest
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	if len(req.Password) < 6 {
-		httpx.Error(w, http.StatusBadRequest, "Password must be at least 6 characters.")
+	if len(req.Password) < minPasswordLength {
+		httpx.Error(w, http.StatusBadRequest, minPasswordMessage)
 		return
+	}
+
+	if isSelf {
+		if requester.PasswordHash == "" {
+			httpx.Error(w, http.StatusBadRequest,
+				"This account signs in through Active Directory; its password is managed there.")
+			return
+		}
+		if bcrypt.CompareHashAndPassword([]byte(requester.PasswordHash), []byte(req.CurrentPassword)) != nil {
+			httpx.Error(w, http.StatusUnauthorized, "Current password is incorrect.")
+			return
+		}
 	}
 
 	hash, err := hashPassword(req.Password)

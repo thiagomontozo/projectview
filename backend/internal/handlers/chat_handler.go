@@ -137,12 +137,23 @@ func (a *API) CreateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/chat/channels/:channelId/messages
+//
+// Membership is enforced with the same filter PostMessage uses. Without it any
+// authenticated user could read any conversation by guessing a channel id,
+// direct messages included.
 func (a *API) GetMessages(w http.ResponseWriter, r *http.Request) {
 	channelID, ok := httpx.ObjectIDParam(w, r, "channelId")
 	if !ok {
 		return
 	}
 	ctx := r.Context()
+
+	requester := auth.CurrentUser(r)
+	var channel models.ChatChannel
+	if err := a.Store.ChatChannels().FindOne(ctx, bson.M{"_id": channelID, "members": requester.ID}).Decode(&channel); err != nil {
+		httpx.Error(w, http.StatusForbidden, "Not a member of this channel.")
+		return
+	}
 
 	cursor, err := a.Store.ChatMessages().Find(ctx, bson.M{"channel": channelID},
 		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100))

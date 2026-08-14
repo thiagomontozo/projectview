@@ -143,6 +143,11 @@ type registerRequest struct {
 }
 
 // POST /api/auth/register - creates a local account.
+//
+// Administrative endpoint: it mints accounts and can assign any role, so the
+// router gates it behind RequireAuth + RequireRole(admin). It was previously
+// reachable unauthenticated while honouring a caller-supplied "role", which
+// let anyone who could reach the API create themselves an administrator.
 func (a *API) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if !httpx.DecodeJSON(w, r, &req) {
@@ -150,6 +155,10 @@ func (a *API) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Username == "" || req.Name == "" || req.Email == "" || req.Password == "" {
 		httpx.Error(w, http.StatusBadRequest, "username, name, email and password are all required.")
+		return
+	}
+	if len(req.Password) < minPasswordLength {
+		httpx.Error(w, http.StatusBadRequest, minPasswordMessage)
 		return
 	}
 
@@ -169,9 +178,17 @@ func (a *API) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only the three known roles are accepted. Anything else is rejected
+	// rather than silently downgraded, so a typo in an automation surfaces
+	// instead of quietly creating an under-privileged account.
 	role := models.RoleMember
-	if req.Role == models.RoleAdmin {
-		role = models.RoleAdmin
+	switch req.Role {
+	case "":
+	case models.RoleAdmin, models.RoleManager, models.RoleMember:
+		role = req.Role
+	default:
+		httpx.Error(w, http.StatusBadRequest, "Invalid role. Expected admin, manager or member.")
+		return
 	}
 
 	now := time.Now()

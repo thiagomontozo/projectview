@@ -270,7 +270,98 @@ section "Notifications"
 check "notifications endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/notifications")"
 
 # ---------------------------------------------------------------------------
+# Regression tests for the privilege escalations fixed in the security pass.
+# Every check below runs as an ordinary member and must be refused.
+section "Authorization boundaries"
+
+member_user="smoke_member_$$"
+member_pass="SmokeMember123!"
+member_payload="{\"username\":\"$member_user\",\"name\":\"Smoke Member\",\"email\":\"$member_user@example.com\",\"password\":\"$member_pass\",\"role\":\"member\"}"
+
+# Account creation used to be anonymous AND honoured a caller-supplied role,
+# so anyone reachable by the API could mint themselves an administrator.
+check "anonymous cannot create an account" "401" \
+    "$(status_of -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -d "$member_payload")"
+check "an unknown role is rejected" "400" \
+    "$(status_of -X POST "$BASE/api/auth/register" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d "{\"username\":\"smoke_bad_$$\",\"name\":\"x\",\"email\":\"smoke_bad_$$@example.com\",\"password\":\"Password123\",\"role\":\"root\"}")"
+
+created="$("${CURL[@]}" -X POST "$BASE/api/auth/register" -H "$AUTH" -H 'Content-Type: application/json' -d "$member_payload")"
+member_id="$(json_str "$created" id)"
+if [ -n "$member_id" ]; then
+    pass "admin can create a member account"
+else
+    fail "admin can create a member account" "$created"
+fi
+
+member_login="$("${CURL[@]}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$member_user\",\"password\":\"$member_pass\"}")"
+MEMBER_AUTH="Authorization: Bearer $(json_str "$member_login" token)"
+
+# --- Account takeover -------------------------------------------------------
+check "member cannot change another user's password" "403" \
+    "$(status_of -X POST "$BASE/api/users/$me_id/password" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"password":"HijackedPassword1"}')"
+check "member cannot edit another user's profile" "403" \
+    "$(status_of -X PUT "$BASE/api/users/$me_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' -d '{"name":"Hijacked"}')"
+
+# Role changes stay admin-only even on your own account.
+self_promote="$("${CURL[@]}" -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+    -d '{"role":"admin"}')"
+contains "member cannot promote themselves" "$self_promote" '"role":"member"'
+
+# --- Private conversation ---------------------------------------------------
+check "member cannot read a channel they are not in" "403" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/chat/channels/$channel_id/messages")"
+
+# --- Creating structure -----------------------------------------------------
+check "member cannot create projects" "403" \
+    "$(status_of -X POST "$BASE/api/projects" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Rogue project","key":"ROGUE"}')"
+check "member cannot create teams" "403" \
+    "$(status_of -X POST "$BASE/api/teams" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' -d '{"name":"Rogue team"}')"
+
+# --- Acting inside a project they do not belong to --------------------------
+check "member cannot add tasks to a foreign project" "403" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/tasks" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"title":"Rogue task"}')"
+check "member cannot move a foreign task" "403" \
+    "$(status_of -X PATCH "$BASE/api/tasks/$task_id/move" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"status":"done","order":0}')"
+check "member cannot comment on a foreign task" "403" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/comments" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"body":"rogue"}')"
+check "member cannot delete a foreign task" "403" \
+    "$(status_of -X DELETE "$BASE/api/tasks/$task_id" -H "$MEMBER_AUTH")"
+check "member cannot reconfigure a foreign project" "403" \
+    "$(status_of -X PUT "$BASE/api/projects/$project_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Hijacked"}')"
+check "member cannot delete a foreign project" "403" \
+    "$(status_of -X DELETE "$BASE/api/projects/$project_id" -H "$MEMBER_AUTH")"
+
+# --- What a member legitimately can do --------------------------------------
+check "member can edit their own profile" "200" \
+    "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' -d '{"title":"QA"}')"
+check "self-service password change needs the current password" "401" \
+    "$(status_of -X POST "$BASE/api/users/$member_id/password" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"currentPassword":"wrong","password":"NewPassword123"}')"
+check "self-service password change works with the current password" "200" \
+    "$(status_of -X POST "$BASE/api/users/$member_id/password" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d "{\"currentPassword\":\"$member_pass\",\"password\":\"NewPassword123\"}")"
+check "short passwords are rejected" "400" \
+    "$(status_of -X POST "$BASE/api/users/$member_id/password" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"password":"short"}')"
+check "admin can reset a user's password without the old one" "200" \
+    "$(status_of -X POST "$BASE/api/users/$member_id/password" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"password":"AdminReset123"}')"
+
+# The project survived every hostile call above.
+contains "the project was never hijacked" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id")" "Smoke Test Project"
+
+# ---------------------------------------------------------------------------
 section "Cleanup"
+check "smoke member deactivated" "200" \
+    "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"active":false}')"
 # Keeps repeated local runs from piling up fixtures in the dev database.
 check "smoke task deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/tasks/$task_id")"
 check "smoke project deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/projects/$project_id")"
