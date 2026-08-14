@@ -1,0 +1,82 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      # Set these to enable auth on the MongoDB container itself. Leave
+      # unset for a quick local/dev start with no DB auth.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - '27017:27017'
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    # Every value below is interpolated from the root ".env" file when it
+    # exists (Compose loads it automatically) and falls back to a working
+    # default otherwise, so "docker compose up" works on a fresh clone.
+    environment:
+      # --- MongoDB (fully configurable) ---
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/pm_dashboard}
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-}
+      # --- Sessions ---
+      JWT_SECRET: ${JWT_SECRET:-please-change-this-to-a-long-random-string}
+      JWT_EXPIRES_IN_HOURS: ${JWT_EXPIRES_IN_HOURS:-8}
+      # --- Active Directory / LDAP ---
+      AD_ENABLED: ${AD_ENABLED:-false}
+      AD_URL: ${AD_URL:-}
+      AD_BASE_DN: ${AD_BASE_DN:-}
+      AD_DOMAIN: ${AD_DOMAIN:-}
+      AD_BIND_DN: ${AD_BIND_DN:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      AD_USERNAME_ATTRIBUTE: ${AD_USERNAME_ATTRIBUTE:-sAMAccountName}
+      AD_TLS_REJECT_UNAUTHORIZED: ${AD_TLS_REJECT_UNAUTHORIZED:-true}
+      # --- Internal e-mail (SMTP) ---
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-ProjectView <no-reply@example.com>}
+      # --- Deadline alerts ---
+      ALERT_CRON: ${ALERT_CRON:-0 * * * *}
+      ALERT_WARN_DAYS_BEFORE: ${ALERT_WARN_DAYS_BEFORE:-2}
+      # --- First-run admin bootstrap ---
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}
+      # --- Misc ---
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      PORT: 4000
+      NODE_ENV: production
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - '4000:4000'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '8080:80'
+
+volumes:
+  mongo_data:
