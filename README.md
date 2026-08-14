@@ -1,5 +1,7 @@
 # ProjectView — Project Management Dashboard
 
+[![CI](https://github.com/thiagomontozo/projectview/actions/workflows/ci.yml/badge.svg)](https://github.com/thiagomontozo/projectview/actions/workflows/ci.yml)
+
 A web application for managing projects, teams and tasks, in the spirit of
 ClickUp: a draggable card dashboard and kanban boards, resource allocation,
 per-person deadline alerts, an internal chat, tracking charts, and login
@@ -227,6 +229,53 @@ Vite proxies `/api` and `/ws` to `http://localhost:4000` (override with
 `VITE_API_PROXY_TARGET`). In this mode you talk to the backend directly over
 plain HTTP, without the edge proxy — set `NODE_ENV=development` so session
 cookies are not marked `secure`.
+
+## Tests
+
+**Backend unit tests** — pure logic, no database required:
+
+```bash
+cd backend
+go test ./...
+```
+
+They cover the MongoDB URI parsing (so `MONGO_URI` really selects the
+database, and credentials never reach the logs), JWT signing and the tokens
+that must be rejected (wrong secret, expired, `alg=none`), the environment
+parsing that decides whether AD and SMTP are enabled, and the HTTP helpers.
+
+**End-to-end smoke test** — runs against a live stack and asserts the
+behaviour unit tests cannot reach:
+
+```bash
+docker compose up -d --build
+scripts/smoke-test.sh                 # defaults to https://localhost
+```
+
+53 assertions covering the proxy (HTTPS redirect, security headers, the
+backend not being reachable from the host), authentication, the first-run
+schema and seed, projects/tasks/sub-tasks with resource allocation and dates,
+the kanban move and its `completedAt` handling, the dashboard aggregations,
+chat, the WebSocket upgrade, and the login rate limit. It cleans up the
+fixtures it creates.
+
+## CI/CD
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and
+pull request:
+
+| Job | What it does |
+|---|---|
+| `backend` | `gofmt` check, build, `go vet`, `go test -race` with coverage |
+| `gencert` | Builds the certificate helper and verifies the certificate it generates (SANs, validity, key) with `openssl` |
+| `frontend` | `npm ci`, TypeScript type-check, production build |
+| `shellcheck` | Lints the shell scripts |
+| `integration` | Brings the full stack up with Docker Compose, waits for every container to report healthy, runs the smoke test, and asserts the collections and indexes were created in MongoDB |
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) publishes the
+`backend`, `frontend` and `proxy` images to the GitHub Container Registry —
+after CI passes on `main`, and on `v*` tags. It never publishes an image built
+from a commit whose CI failed.
 
 ## Data model (summary)
 

@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# End-to-end smoke test against a running stack (docker compose up).
+#
+# Exercises the requirements the unit tests cannot reach: TLS termination and
+# the proxy rules, authentication, the task/sub-task model with resource
+# allocation and dates, the kanban move, the dashboard aggregations, chat, and
+# the realtime WebSocket upgrade.
+#
+# Usage: scripts/smoke-test.sh [base-url]      (default: https://localhost)
+#
+# Deliberately avoids jq so it runs on a bare CI runner and on Git Bash.
+set -uo pipefail
+
+BASE="${1:-https://localhost}"
+ADMIN_USER="${BOOTSTRAP_ADMIN_USERNAME:-admin}"
+ADMIN_PASS="${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}"
+
+# -k: the default deployment uses a self-signed certificate.
+CURL=(curl -sk --max-time 20)
+
+PASS=0
+FAIL=0
+
+pass() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
+fail() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
+
+# check <description> <expected> <actual>
+check() {
+    if [ "$2" = "$3" ]; then
+        pass "$1"
+    else
+        fail "$1" "expected [$2], got [$3]"
+    fi
+}
+
+# contains <description> <haystack> <needle>
+contains() {
+    case "$2" in
+    *"$3"*) pass "$1" ;;
+    *) fail "$1" "[$3] not found in: $(printf '%s' "$2" | head -c 200)" ;;
+    esac
+}
+
+status_of() { "${CURL[@]}" -o /dev/null -w '%{http_code}' "$@"; }
+
+# Extracts a string field from a JSON document without jq, taking the FIRST
+# occurrence in document order (sed alone would anchor on the last one, since
+# its .* is greedy - and responses embed nested objects with their own "id").
+json_str() {
+    printf '%s' "$1" | grep -o "\"$2\":\"[^\"]*\"" | head -n 1 | sed "s/^\"$2\":\"//; s/\"$//"
+}
+
+section() { printf '\n=== %s ===\n' "$1"; }
+
+# ---------------------------------------------------------------------------
+section "Waiting for the stack"
+ready=""
+for _ in $(seq 1 60); do
+    if [ "$(status_of "$BASE/api/health")" = "200" ]; then
+        ready=yes
+        break
+    fi
+    sleep 2
+done
+if [ -z "$ready" ]; then
+    printf 'the API never became reachable at %s/api/health\n' "$BASE" >&2
+    exit 1
+fi
+pass "API reachable at $BASE"
+
+# ---------------------------------------------------------------------------
+section "Edge proxy"
+HTTP_BASE="$(printf '%s' "$BASE" | sed 's|^https://|http://|')"
+
+check "HTTP is redirected to HTTPS" "301" "$(status_of "$HTTP_BASE/projects")"
+contains "redirect points at https" \
+    "$("${CURL[@]}" -o /dev/null -w '%{redirect_url}' "$HTTP_BASE/projects")" "https://"
+check "proxy health endpoint" "200" "$(status_of "$HTTP_BASE/healthz")"
+check "SPA is served over HTTPS" "200" "$(status_of "$BASE/")"
+
+headers="$("${CURL[@]}" -I "$BASE/")"
+contains "HSTS header"                 "$headers" "Strict-Transport-Security"
+contains "X-Content-Type-Options"      "$headers" "nosniff"
+contains "X-Frame-Options"             "$headers" "SAMEORIGIN"
+contains "Referrer-Policy"             "$headers" "strict-origin-when-cross-origin"
+contains "Permissions-Policy"          "$headers" "geolocation=()"
+if printf '%s' "$headers" | grep -qi '^server: nginx/'; then
+    fail "nginx version is hidden" "server header exposes the version"
+else
+    pass "nginx version is hidden"
+fi
+
+# The backend must not be reachable except through the proxy.
+backend_host="$(printf '%s' "$BASE" | sed 's|^https\?://||; s|[:/].*$||')"
+if "${CURL[@]}" --max-time 5 -o /dev/null "http://$backend_host:4000/api/health"; then
+    fail "backend is not published to the host" "port 4000 answered directly"
+else
+    pass "backend is not published to the host"
+fi
+
+# ---------------------------------------------------------------------------
+section "Authentication"
+check "unauthenticated API call is rejected" "401" "$(status_of "$BASE/api/projects")"
+
+login_body="{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}"
+login="$("${CURL[@]}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "$login_body")"
+TOKEN="$(json_str "$login" token)"
+
+if [ -n "$TOKEN" ]; then
+    pass "admin login returns a token"
+else
+    fail "admin login returns a token" "$login"
+    printf '\ncannot continue without a session token\n' >&2
+    exit 1
+fi
+contains "seeded admin has the admin role" "$login" '"role":"admin"'
+
+check "wrong password is rejected" "401" \
+    "$(status_of -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+        -d "{\"username\":\"$ADMIN_USER\",\"password\":\"definitely-wrong\"}")"
+
+AUTH="Authorization: Bearer $TOKEN"
+check "authenticated API call succeeds" "200" "$(status_of -H "$AUTH" "$BASE/api/projects")"
+
+me="$("${CURL[@]}" -H "$AUTH" "$BASE/api/auth/me")"
+contains "/api/auth/me returns the session user" "$me" "\"username\":\"$ADMIN_USER\""
+
+# ---------------------------------------------------------------------------
+section "First-run schema and seed"
+projects="$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects")"
+contains "sample project was seeded" "$projects" "Sample Project"
+contains "project carries kanban columns" "$projects" '"key":"in_progress"'
+
+teams="$("${CURL[@]}" -H "$AUTH" "$BASE/api/teams")"
+contains "default team was seeded" "$teams" "Default Team"
+
+users="$("${CURL[@]}" -H "$AUTH" "$BASE/api/users")"
+contains "admin user exists" "$users" "\"email\":"
+
+# ---------------------------------------------------------------------------
+section "Projects, tasks, sub-tasks and allocation"
+me_id="$(json_str "$me" id)"
+
+project_payload="{\"name\":\"Smoke Test Project\",\"key\":\"SMOKE$$\",\"description\":\"created by scripts/smoke-test.sh\"}"
+project="$("${CURL[@]}" -X POST "$BASE/api/projects" -H "$AUTH" -H 'Content-Type: application/json' -d "$project_payload")"
+project_id="$(json_str "$project" id)"
+
+if [ -n "$project_id" ]; then
+    pass "project created"
+else
+    fail "project created" "$project"
+    exit 1
+fi
+
+# A task with an assignee (resource allocation) and start/due dates.
+task_payload="{\"title\":\"Smoke parent task\",\"assignees\":[\"$me_id\"],\"startDate\":\"2026-01-01T00:00:00Z\",\"dueDate\":\"2026-12-31T00:00:00Z\",\"estimateHours\":8,\"priority\":\"high\"}"
+task="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/tasks" -H "$AUTH" -H 'Content-Type: application/json' -d "$task_payload")"
+task_id="$(json_str "$task" id)"
+
+if [ -n "$task_id" ]; then
+    pass "task created"
+else
+    fail "task created" "$task"
+    exit 1
+fi
+contains "task keeps its start date"   "$task" '"startDate":"2026-01-01'
+contains "task keeps its due date"     "$task" '"dueDate":"2026-12-31'
+contains "task keeps its priority"     "$task" '"priority":"high"'
+contains "resource is allocated to it" "$task" "\"id\":\"$me_id\""
+
+subtask_payload="{\"title\":\"Smoke sub-task\",\"project\":\"$project_id\",\"parentTask\":\"$task_id\",\"assignees\":[\"$me_id\"]}"
+subtask="$("${CURL[@]}" -X POST "$BASE/api/tasks" -H "$AUTH" -H 'Content-Type: application/json' -d "$subtask_payload")"
+contains "sub-task points at its parent" "$subtask" "\"parentTask\":\"$task_id\""
+
+parent="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id")"
+contains "parent lists the sub-task" "$parent" "Smoke sub-task"
+
+# Moving a card on the board, which is what the kanban drag-and-drop calls.
+moved="$("${CURL[@]}" -X PATCH "$BASE/api/tasks/$task_id/move" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"status":"in_progress","order":3}')"
+contains "task moved to in_progress" "$moved" '"status":"in_progress"'
+
+reread="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id")"
+contains "move was persisted" "$reread" '"status":"in_progress"'
+
+done_task="$("${CURL[@]}" -X PATCH "$BASE/api/tasks/$task_id/move" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"status":"done","order":0}')"
+contains "completing a task stamps completedAt" "$done_task" '"completedAt":'
+
+reopened="$("${CURL[@]}" -X PATCH "$BASE/api/tasks/$task_id/move" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"status":"todo","order":0}')"
+if printf '%s' "$reopened" | grep -q '"completedAt":"'; then
+    fail "reopening a task clears completedAt" "$reopened"
+else
+    pass "reopening a task clears completedAt"
+fi
+
+mine="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/mine")"
+contains "task shows up in the assignee's list" "$mine" "Smoke parent task"
+
+workload="$("${CURL[@]}" -H "$AUTH" "$BASE/api/users/workload")"
+contains "workload report includes the resource" "$workload" '"openTasks"'
+
+comment="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/comments" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"body":"smoke comment"}')"
+contains "comment added to the task" "$comment" "smoke comment"
+
+# ---------------------------------------------------------------------------
+section "Dashboard charts"
+for endpoint in overview status-breakdown workload-chart project-progress completion-trend; do
+    check "dashboard/$endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/dashboard/$endpoint")"
+done
+contains "overview counts projects" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/dashboard/overview")" '"totalProjects":'
+
+# ---------------------------------------------------------------------------
+section "Internal chat"
+channels="$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels")"
+channel_id="$(json_str "$channels" id)"
+if [ -n "$channel_id" ]; then
+    pass "chat channel was seeded"
+    posted="$("${CURL[@]}" -X POST "$BASE/api/chat/channels/$channel_id/messages" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"body":"smoke message"}')"
+    contains "chat message posted" "$posted" "smoke message"
+    contains "chat history returns it" \
+        "$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels/$channel_id/messages")" "smoke message"
+else
+    fail "chat channel was seeded" "$channels"
+fi
+
+# ---------------------------------------------------------------------------
+section "Realtime WebSocket"
+ws="$("${CURL[@]}" -i -N --max-time 5 \
+    -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==' \
+    "$BASE/ws?token=$TOKEN" 2>/dev/null | head -n 1)"
+contains "WebSocket upgrade through the proxy" "$ws" "101"
+
+ws_anon="$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/ws")"
+check "WebSocket without a token is rejected" "401" "$ws_anon"
+
+# ---------------------------------------------------------------------------
+section "Notifications"
+check "notifications endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/notifications")"
+
+# ---------------------------------------------------------------------------
+section "Cleanup"
+# Keeps repeated local runs from piling up fixtures in the dev database.
+check "smoke task deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/tasks/$task_id")"
+check "smoke project deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/projects/$project_id")"
+
+# ---------------------------------------------------------------------------
+# Runs last: it deliberately exhausts the login rate limiter for a minute.
+section "Login rate limiting"
+codes=""
+for _ in $(seq 1 20); do
+    codes="$codes $(status_of -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "$login_body")"
+done
+contains "login is rate limited (429)" "$codes" "429"
+contains "the first attempts still pass" "$codes" "200"
+
+# ---------------------------------------------------------------------------
+printf '\n-----------------------------------------\n'
+printf 'passed: %d   failed: %d\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ] || exit 1
+printf 'smoke test OK\n'
