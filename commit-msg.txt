@@ -1,0 +1,25 @@
+Add an nginx edge proxy with TLS termination; docs in English
+
+Puts the whole stack behind a dedicated nginx container that owns every
+routing and hardening rule, so the backend is no longer reachable over
+plain HTTP and its secure session cookies actually work.
+
+- proxy/: new container terminating TLS (1.2/1.3, HTTP/2), redirecting
+  HTTP to HTTPS, setting HSTS and the other security headers, rate
+  limiting /api/auth/login (10r/m) and /api/ (30r/s), and proxying /ws
+  with the upgrade handshake.
+- The proxy is now the only service published to the host; backend and
+  frontend moved to expose-only, and MongoDB is bound to 127.0.0.1.
+- A self-signed certificate is generated on first boot when none is
+  mounted, using a small static Go helper (proxy/gencert) instead of the
+  openssl CLI, which the nginx alpine base does not ship.
+- frontend/nginx.conf reduced to static serving plus asset caching, since
+  the edge now handles /api and /ws.
+- Backend runtime image no longer runs apk: the CA bundle is copied from
+  the build stage and timezone data is embedded via time/tzdata.
+- ca/: optional extra root CAs, wired in as a Docker additional build
+  context, for networks that intercept TLS and would otherwise break
+  go mod download and npm ci.
+- README rewritten in English and updated for the new topology.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

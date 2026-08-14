@@ -15,9 +15,10 @@ RUN chmod +x /usr/local/bin/proxy-entrypoint.sh
 EXPOSE 80 443
 
 # Probes the plain-HTTP health endpoint, which is served before the HTTPS
-# redirect, so the check does not depend on TLS.
+# redirect, so the check does not depend on TLS. Uses 127.0.0.1 rather than
+# localhost: the latter resolves to ::1 first, and nginx listens on IPv4 only.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost/healthz || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1/healthz || exit 1
 
 ENTRYPOINT ["/usr/local/bin/proxy-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
