@@ -8,3 +8,10 @@ dist/
 *.tsbuildinfo
 /frontend/vite.config.js
 /frontend/vite.config.d.ts
+
+# TLS material and ACME webroot (never commit certificates or keys).
+# Covers proxy/certs/ and the optional build-time root CAs in ca/.
+*.pem
+*.key
+*.crt
+/proxy/certbot-webroot/

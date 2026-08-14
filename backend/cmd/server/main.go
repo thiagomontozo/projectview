@@ -12,6 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	// Embeds the IANA timezone database in the binary, so the runtime image
+	// does not need the tzdata package for ALERT_CRON and date formatting.
+	_ "time/tzdata"
+
 	"github.com/joho/godotenv"
 
 	"projectview/internal/config"
