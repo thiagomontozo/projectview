@@ -106,11 +106,19 @@
   --duration-normal: 180ms;
   --duration-slow: 280ms;
 
-  /* --- Layering ----------------------------------------------------------- */
+  /* --- Layering -----------------------------------------------------------
+   * Popups outrank modals, which reads backwards until you remember that a
+   * popup is always opened BY something, and that something is often inside a
+   * modal. Radix portals a select or menu to <body>, so it becomes a sibling
+   * of the dialog rather than a child: below the modal it opens correctly,
+   * receives the click, and paints behind the dialog surface where nobody can
+   * see it. The select in the task editor did exactly that.
+   * Toasts stay on top, because a toast reports something that happened and
+   * must be readable whatever is open. */
   --z-sticky: 10;
-  --z-dropdown: 40;
   --z-overlay: 50;
   --z-modal: 60;
+  --z-dropdown: 65;
   --z-toast: 70;
 
   /* --- Layout ------------------------------------------------------------- */
