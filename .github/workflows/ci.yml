@@ -153,6 +153,8 @@ jobs:
                    sessions audit_log spaces space_members folders \
                    task_dependencies custom_field_definitions time_entries \
                    task_watchers automations automation_runs \
+                   chat_reactions chat_mentions docs doc_revisions \
+                   notification_preferences \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
@@ -162,12 +164,18 @@ jobs:
           psql "SELECT tgname FROM pg_trigger WHERE tgname = 'task_dependencies_acyclic'" | grep -q . \
             || { echo "dependency cycle guard is missing" >&2; exit 1; }
 
+          # A reply is a reply to a root message, never to another reply.
+          # Enforced by a trigger so no code path can nest a thread.
+          psql "SELECT tgname FROM pg_trigger WHERE tgname = 'chat_messages_flat_threads'" | grep -q . \
+            || { echo "thread-nesting guard is missing" >&2; exit 1; }
+
           # One running timer per person is a database invariant.
           psql "SELECT indexname FROM pg_indexes WHERE indexname = 'time_entries_single_running_idx'" | grep -q . \
             || { echo "single-running-timer index is missing" >&2; exit 1; }
 
           # Every migration must be recorded, so a restart does not re-run one.
-          for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy 0004_product_engine; do
+          for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy \
+                   0004_product_engine 0005_collaboration; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done

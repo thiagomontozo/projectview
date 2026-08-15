@@ -34,7 +34,8 @@
     "chat": "Chat interno",
     "settings": "Configurações",
     "primary": "Navegação principal",
-    "skipToContent": "Pular para o conteúdo"
+    "skipToContent": "Pular para o conteúdo",
+    "docs": "Documentos"
   },
   "auth": {
     "signIn": "Entrar",
@@ -187,7 +188,19 @@
     "empty": "Nenhuma mensagem ainda",
     "emptyBody": "Seja o primeiro a escrever neste canal.",
     "noChannel": "Selecione um canal",
-    "noChannelBody": "Escolha um canal à esquerda para ver as mensagens."
+    "noChannelBody": "Escolha um canal à esquerda para ver as mensagens.",
+    "online": "Online",
+    "nobodyOnline": "Ninguém online",
+    "typing": "{{names}} está digitando...",
+    "typing_plural": "{{names}} estão digitando...",
+    "react": "Reagir com {{emoji}}",
+    "reactionCount": "{{emoji}}, {{count}} pessoa",
+    "reactionCount_plural": "{{emoji}}, {{count}} pessoas",
+    "reply": "Responder",
+    "replies": "{{count}} resposta",
+    "replies_plural": "{{count}} respostas",
+    "replyPlaceholder": "Responder na thread...",
+    "thread": "Thread"
   },
   "notifications": {
     "title": "Notificações",
@@ -207,7 +220,24 @@
     "lastUsed": "Último uso",
     "revoke": "Encerrar",
     "revoked": "Sessão encerrada.",
-    "profile": "Perfil"
+    "profile": "Perfil",
+    "notifications": "Notificações",
+    "notificationsHint": "Escolha como cada tipo de aviso chega até você. O que você desliga aqui deixa de ser enviado — o resumo diário continua reunindo o que ficou pendente.",
+    "notificationType": "Tipo",
+    "inApp": "No app",
+    "email": "E-mail",
+    "notif_task_assigned": "Tarefa atribuída a mim",
+    "notif_task_due_soon": "Prazo se aproximando",
+    "notif_task_overdue": "Tarefa atrasada",
+    "notif_comment_mention": "Menção em comentário",
+    "notif_chat_message": "Mensagem no chat",
+    "digest": "Resumo por e-mail",
+    "digestHint": "Reúne em uma única mensagem o que não foi enviado na hora.",
+    "digest_off": "Desligado",
+    "digest_daily": "Diário",
+    "digest_weekly": "Semanal",
+    "digestHour": "Horário do resumo",
+    "preferencesSaved": "Preferências salvas"
   },
   "command": {
     "placeholder": "Buscar tarefas ou navegar...",
@@ -276,5 +306,23 @@
     "loadFull": "Perto da capacidade",
     "loadOver": "Acima de {{capacity}}h/semana",
     "criticalPath": "Caminho crítico"
+  },
+  "docs": {
+    "title": "Documentos",
+    "hint": "Notas, decisões e material de referência, escritos em Markdown. Toda gravação guarda a versão anterior.",
+    "new": "Novo documento",
+    "untitled": "Documento sem título",
+    "docTitle": "Título do documento",
+    "body": "Conteúdo do documento",
+    "placeholder": "Escreva em Markdown...",
+    "saved": "Salvo",
+    "updated": "Atualizado",
+    "revisions": "{{count}} versão",
+    "revisions_plural": "{{count}} versões",
+    "selectOne": "Selecione um documento",
+    "empty": "Nenhum documento ainda",
+    "emptyBody": "Crie o primeiro documento deste espaço.",
+    "history": "Histórico",
+    "restore": "Restaurar"
   }
 }

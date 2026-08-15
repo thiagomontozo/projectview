@@ -250,9 +250,72 @@ if [ -n "$channel_id" ]; then
     contains "chat message posted" "$posted" "smoke message"
     contains "chat history returns it" \
         "$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels/$channel_id/messages")" "smoke message"
+    message_id="$(json_str "$posted" id)"
 else
     fail "chat channel was seeded" "$channels"
 fi
+
+# ---------------------------------------------------------------------------
+section "Threads, reactions and mentions"
+
+reply="$("${CURL[@]}" -X POST "$BASE/api/chat/messages/$message_id/replies" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"body":"smoke reply"}')"
+contains "a reply is posted into the thread" "$reply" "smoke reply"
+contains "the reply carries its parent"      "$reply" "$message_id"
+
+thread="$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/messages/$message_id/replies")"
+contains "the thread lists the reply" "$thread" "smoke reply"
+
+# A reply belongs to its thread, not to the channel: repeating it at the root
+# would make every threaded exchange appear twice in the transcript.
+root="$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels/$channel_id/messages")"
+if printf '%s' "$root" | grep -q "smoke reply"; then
+    fail "replies stay out of the channel transcript" "the reply appears at channel root"
+else
+    pass "replies stay out of the channel transcript"
+fi
+contains "the parent carries a reply count" "$root" '"replyCount":1'
+
+# The emoji goes out as a JSON escape rather than as raw UTF-8 in the request
+# body. curl.exe under Git Bash re-encodes its arguments through the Windows
+# ANSI codepage, which turns anything outside that codepage into a literal "?"
+# - so a raw emoji here would quietly store the wrong characters on Windows
+# while passing on Linux. The escape is plain ASCII on the wire and decodes to
+# U+1F44D at the server. The assertions below still compare against the
+# literal, because those run inside bash and grep, where the bytes survive.
+THUMBS_UP='{"emoji":"\ud83d\udc4d"}'
+
+reacted="$("${CURL[@]}" -X POST "$BASE/api/chat/messages/$message_id/reactions" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "$THUMBS_UP")"
+contains "a reaction is added" "$reacted" '"added":true'
+contains "it is attached to the message" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels/$channel_id/messages")" '👍'
+
+# A "reaction" is an emoji, not a place to store a paragraph.
+check "a long reaction is refused" "400" \
+    "$(status_of -X POST "$BASE/api/chat/messages/$message_id/reactions" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"emoji":"this is not an emoji"}')"
+
+# The same call toggles: a second tap removes the reaction rather than
+# stacking a duplicate.
+"${CURL[@]}" -o /dev/null -X POST "$BASE/api/chat/messages/$message_id/reactions" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "$THUMBS_UP"
+after_toggle="$("${CURL[@]}" -H "$AUTH" "$BASE/api/chat/channels/$channel_id/messages")"
+if printf '%s' "$after_toggle" | grep -q '👍'; then
+    fail "reacting twice removes the reaction" "the emoji is still attached"
+else
+    pass "reacting twice removes the reaction"
+fi
+
+check "an unknown message cannot be replied to" "404" \
+    "$(status_of -X POST "$BASE/api/chat/messages/00000000-0000-0000-0000-000000000000/replies" \
+        -H "$AUTH" -H 'Content-Type: application/json' -d '{"body":"x"}')"
+
+# ---------------------------------------------------------------------------
+section "Presence"
+presence="$("${CURL[@]}" -H "$AUTH" "$BASE/api/presence")"
+contains "presence answers with a list" "$presence" "["
+check "presence requires a session" "401" "$(status_of "$BASE/api/presence")"
 
 # ---------------------------------------------------------------------------
 section "Realtime WebSocket"
@@ -575,6 +638,98 @@ check "member cannot create spaces" "403" \
         -d '{"name":"Rogue space"}')"
 check "member cannot delete a space" "403" \
     "$(status_of -X DELETE "$BASE/api/spaces/$new_space_id" -H "$MEMBER_AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Docs"
+doc="$("${CURL[@]}" -X POST "$BASE/api/docs" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"spaceId\":\"$new_space_id\",\"title\":\"Smoke doc\",\"content\":\"first draft\"}")"
+doc_id="$(json_str "$doc" id)"
+if [ -n "$doc_id" ]; then
+    pass "document created"
+else
+    fail "document created" "$doc"
+fi
+
+contains "documents are listed for their space" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/docs?spaceId=$new_space_id")" "Smoke doc"
+
+updated_doc="$("${CURL[@]}" -X PUT "$BASE/api/docs/$doc_id" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"title":"Smoke doc","content":"second draft"}')"
+contains "document content is updated" "$updated_doc" "second draft"
+
+revs="$("${CURL[@]}" -H "$AUTH" "$BASE/api/docs/$doc_id/revisions")"
+before="$(printf '%s' "$revs" | grep -o '"id":' | wc -l | tr -d ' ')"
+check "creating and editing left two versions" "2" "$before"
+
+# Saving identical content must not manufacture a revision, or the history
+# fills with noise and hides the edits that matter.
+"${CURL[@]}" -o /dev/null -X PUT "$BASE/api/docs/$doc_id" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"title":"Smoke doc","content":"second draft"}'
+revs_again="$("${CURL[@]}" -H "$AUTH" "$BASE/api/docs/$doc_id/revisions")"
+after="$(printf '%s' "$revs_again" | grep -o '"id":' | wc -l | tr -d ' ')"
+check "an unchanged save creates no revision" "$before" "$after"
+
+# A history nobody can read back is decorative: recovering from a careless
+# paste means fetching the old text, so the first draft must still be there.
+oldest="$(printf '%s' "$revs" | grep -o '"id":[0-9]*' | tail -n 1 | cut -d: -f2)"
+old_rev="$("${CURL[@]}" -H "$AUTH" "$BASE/api/docs/$doc_id/revisions/$oldest")"
+contains "an old version can be read back" "$old_rev" "first draft"
+
+# The document id is part of the lookup, so a revision id guessed from another
+# document does not resolve.
+check "a revision of another document is not reachable" "404" \
+    "$(status_of -H "$AUTH" "$BASE/api/docs/$new_space_id/revisions/$oldest")"
+
+# A document carries no access list of its own: it is exactly as visible, and
+# exactly as editable, as the space holding it.
+check "an open space's documents are readable" "200" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/docs/$doc_id")"
+check "reading it does not imply editing it" "403" \
+    "$(status_of -X PUT "$BASE/api/docs/$doc_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"content":"vandalised"}')"
+check "a member cannot delete the document" "403" \
+    "$(status_of -X DELETE "$BASE/api/docs/$doc_id" -H "$MEMBER_AUTH")"
+
+# The same inheritance in the direction that matters: a private space hides its
+# documents, and hides them as absent rather than as forbidden.
+private_space="$("${CURL[@]}" -X POST "$BASE/api/spaces" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Smoke Private $$\",\"isPrivate\":true}")"
+private_space_id="$(json_str "$private_space" id)"
+private_doc="$("${CURL[@]}" -X POST "$BASE/api/docs" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"spaceId\":\"$private_space_id\",\"title\":\"Secret\",\"content\":\"confidential\"}")"
+private_doc_id="$(json_str "$private_doc" id)"
+check "a private space's documents are hidden" "404" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/docs/$private_doc_id")"
+check "their revisions are hidden too" "404" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/docs/$private_doc_id/revisions")"
+check "listing cannot walk around it" "404" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/docs?spaceId=$private_space_id")"
+
+check "document deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/docs/$doc_id")"
+check "private space deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/spaces/$private_space_id")"
+
+# ---------------------------------------------------------------------------
+section "Notification preferences"
+prefs="$("${CURL[@]}" -H "$AUTH" "$BASE/api/notifications/preferences")"
+contains "preferences answer with defaults" "$prefs" '"channels"'
+contains "the digest defaults to a value"   "$prefs" '"digest"'
+
+saved="$("${CURL[@]}" -X PUT "$BASE/api/notifications/preferences" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"channels":{"task_assigned":{"inApp":true,"email":false}},"digest":"daily","digestHour":8}')"
+contains "preferences are saved"    "$saved" '"digest":"daily"'
+contains "the digest hour is saved" "$saved" '"digestHour":8'
+
+reread="$("${CURL[@]}" -H "$AUTH" "$BASE/api/notifications/preferences")"
+contains "preferences survive a re-read" "$reread" '"digest":"daily"'
+
+# An hour outside the clock is a bug on the way in, not a value to store.
+check "an impossible digest hour is rejected" "400" \
+    "$(status_of -X PUT "$BASE/api/notifications/preferences" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"digest":"daily","digestHour":47}')"
+check "an unknown digest cadence is rejected" "400" \
+    "$(status_of -X PUT "$BASE/api/notifications/preferences" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"digest":"hourly"}')"
 
 # ---------------------------------------------------------------------------
 section "Search and pagination"

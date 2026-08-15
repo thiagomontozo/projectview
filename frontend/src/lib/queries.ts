@@ -81,6 +81,12 @@ export const keys = {
   customFields: (projectId: string) => ['projects', projectId, 'fields'] as const,
   taskTime: (taskId: string) => ['tasks', taskId, 'time'] as const,
   runningTimer: ['time', 'running'] as const,
+  thread: (messageId: string) => ['chat', 'thread', messageId] as const,
+  presence: ['presence'] as const,
+  docs: (scopeId: string) => ['docs', scopeId] as const,
+  doc: (id: string) => ['docs', 'detail', id] as const,
+  docRevisions: (id: string) => ['docs', 'detail', id, 'revisions'] as const,
+  notificationPreferences: ['notifications', 'preferences'] as const,
   channels: ['chat', 'channels'] as const,
   messages: (channelId: string) => ['chat', channelId, 'messages'] as const,
   notifications: ['notifications'] as const,
@@ -485,6 +491,176 @@ export function usePostMessage() {
       client.invalidateQueries({ queryKey: keys.messages(channelId) });
       client.invalidateQueries({ queryKey: keys.channels });
     }
+  });
+}
+
+/* --- Chat: threads, reactions, presence ------------------------------------------- */
+
+export interface Reaction {
+  emoji: string;
+  users: string[];
+}
+
+export interface ChatMessageDetail extends ChatMessage {
+  parentId?: string;
+  editedAt?: string;
+  reactions: Reaction[];
+  replyCount: number;
+}
+
+export function useThread(messageId: string | undefined) {
+  return useQuery({
+    queryKey: keys.thread(messageId ?? ''),
+    queryFn: () => get<ChatMessageDetail[]>(`/chat/messages/${messageId}/replies`),
+    enabled: Boolean(messageId)
+  });
+}
+
+export function useReply() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, body }: { messageId: string; body: string; channelId: string }) =>
+      api.post<ChatMessageDetail>(`/chat/messages/${messageId}/replies`, { body }).then((r) => r.data),
+    onSuccess: (_reply, { messageId, channelId }) => {
+      client.invalidateQueries({ queryKey: keys.thread(messageId) });
+      // The parent's reply count changed, so the channel list is stale too.
+      client.invalidateQueries({ queryKey: keys.messages(channelId) });
+    }
+  });
+}
+
+export function useToggleReaction() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string; channelId: string }) =>
+      api.post<{ added: boolean }>(`/chat/messages/${messageId}/reactions`, { emoji }).then((r) => r.data),
+    onSuccess: (_result, { channelId }) => client.invalidateQueries({ queryKey: keys.messages(channelId) })
+  });
+}
+
+export function usePresence() {
+  return useQuery({
+    queryKey: keys.presence,
+    queryFn: () => get<string[]>('/presence'),
+    // Presence also arrives over the socket; this is the initial state and a
+    // safety net for a client that reconnected and missed events.
+    refetchInterval: 60_000
+  });
+}
+
+/* --- Docs -------------------------------------------------------------------------- */
+
+export interface Doc {
+  id: string;
+  spaceId?: string;
+  projectId?: string;
+  parentId?: string;
+  title: string;
+  content: string;
+  position: number;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocRevision {
+  id: number;
+  title: string;
+  authorId?: string;
+  createdAt: string;
+  /** Only the single-revision endpoint returns the text. */
+  content?: string;
+}
+
+export function useDocs(scope: { spaceId?: string; projectId?: string }) {
+  const key = scope.spaceId ?? scope.projectId ?? '';
+  return useQuery({
+    queryKey: keys.docs(key),
+    queryFn: () => get<Doc[]>('/docs', scope),
+    enabled: Boolean(key)
+  });
+}
+
+export function useDoc(id: string | undefined) {
+  return useQuery({
+    queryKey: keys.doc(id ?? ''),
+    queryFn: () => get<Doc>(`/docs/${id}`),
+    enabled: Boolean(id)
+  });
+}
+
+export function useCreateDoc() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<Doc>) => api.post<Doc>('/docs', body).then((r) => r.data),
+    onSuccess: (doc) => client.invalidateQueries({ queryKey: keys.docs(doc.spaceId ?? doc.projectId ?? '') })
+  });
+}
+
+export function useSaveDoc() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; title?: string; content?: string; archived?: boolean }) =>
+      api.put<Doc>(`/docs/${id}`, body).then((r) => r.data),
+    onSuccess: (doc) => {
+      client.invalidateQueries({ queryKey: keys.doc(doc.id) });
+      client.invalidateQueries({ queryKey: keys.docs(doc.spaceId ?? doc.projectId ?? '') });
+    }
+  });
+}
+
+export function useDocRevisions(id: string | undefined) {
+  return useQuery({
+    queryKey: keys.docRevisions(id ?? ''),
+    queryFn: () => get<DocRevision[]>(`/docs/${id}/revisions`),
+    enabled: Boolean(id)
+  });
+}
+
+/**
+ * Loads one past version, on demand.
+ *
+ * The listing deliberately omits bodies, so restoring means fetching the
+ * chosen revision by itself rather than holding every version in memory for a
+ * button nobody may press.
+ */
+export function useDocRevision(docId: string | undefined, revisionId: number | undefined) {
+  return useQuery({
+    queryKey: [...keys.docRevisions(docId ?? ''), revisionId],
+    queryFn: () => get<DocRevision>(`/docs/${docId}/revisions/${revisionId}`),
+    enabled: Boolean(docId && revisionId)
+  });
+}
+
+/* --- Notification preferences ------------------------------------------------------- */
+
+export interface ChannelPreference {
+  inApp: boolean;
+  email: boolean;
+}
+
+export interface NotificationPreferences {
+  channels: Record<string, ChannelPreference>;
+  digest: 'off' | 'daily' | 'weekly';
+  digestHour: number;
+  quietStart?: number;
+  quietEnd?: number;
+}
+
+export function useNotificationPreferences() {
+  return useQuery({
+    queryKey: keys.notificationPreferences,
+    queryFn: () => get<NotificationPreferences>('/notifications/preferences'),
+    staleTime: 5 * 60_000
+  });
+}
+
+export function useSaveNotificationPreferences() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (prefs: NotificationPreferences) =>
+      api.put<NotificationPreferences>('/notifications/preferences', prefs).then((r) => r.data),
+    onSuccess: (prefs) => client.setQueryData(keys.notificationPreferences, prefs)
   });
 }
 

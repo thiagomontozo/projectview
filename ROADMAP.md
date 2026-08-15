@@ -15,15 +15,16 @@ Phase A2 Domain, security, ops       ██████████████�
 Phase A3 Product engine              ████████████████░░░░   80%   ✅
 Phase B1 UI foundation               ████████████████████  100%   ✅
 Phase B2 Views                       ████████████████░░░░   80%   ✅
-Phase B3 Collaboration               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase B3 Collaboration               ████████████████░░░░   80%   ✅
 Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
                                      ─────────────────────
-                              overall  ~6 of 8 phases
+                              overall  ~7 of 8 phases
 ```
 
 Schedules have real dependencies and a critical path, tasks carry typed
-custom fields and tracked time, and rules act on changes without anyone
-asking. What remains is the collaboration surface and the enterprise
+custom fields and tracked time, rules act on changes without anyone asking,
+and the conversation around the work — threads, reactions, mentions,
+documents, presence — happens in the product. What remains is the enterprise
 layer.
 
 ---
@@ -280,14 +281,67 @@ and public API tokens. Webhooks in particular need retry, backoff and a
 delivery log to be worth shipping — a phase of their own, not a corner of this
 one.
 
+## ✅ Phase B3 — Collaboration
+
+The work had a record; the conversation around it did not.
+
+**A bidirectional socket.** The WebSocket was push-only: the server talked, the
+client listened. It now carries *ephemeral* state in both directions — presence
+and typing — while everything that persists still goes through REST, where
+validation, authorization and the audit trail live. Presence changes only on
+the first and last connection, because a second tab does not make someone twice
+as online. Typing entries carry a timestamp rather than a flag and expire on
+their own: a client that closes its laptop mid-word never sends the stop frame.
+Keep-alive frames are swallowed rather than rebroadcast, so one person typing
+does not become a flood.
+
+**Threads and reactions.** A reply belongs to its thread, not to the channel,
+so a threaded exchange appears once in the transcript with a reply count rather
+than twice in full. Replies cannot nest — a trigger enforces it, not a
+convention — because a tree of replies is a different product with different
+navigation. Reactions toggle: tapping the same emoji twice removes it instead
+of stacking duplicates.
+
+**Mentions.** `@name` is resolved against real usernames, and the pattern
+deliberately refuses to fire inside an e-mail address. Naming someone who
+cannot read the channel notifies nobody: the notification itself would confirm
+the conversation exists.
+
+**Docs.** Markdown, not a rich-text document model — the content stays
+greppable, diffable and portable, and the editor is a detail of one screen
+rather than a format the database has to understand. Every save keeps the
+previous version, and an unchanged save keeps none, so history holds edits
+rather than noise. Old versions can be read back and restored, because a
+history nobody can open is decorative. A document carries no access list of its
+own: it is exactly as visible, and exactly as editable, as the space or project
+containing it, so a permission is granted in one place and revoked in one
+place.
+
+**Notification preferences and digests.** Per type, per channel, with quiet
+hours and a daily or weekly digest. Turning immediate e-mail off does not mean
+going blind: what was held back arrives as one message. Quiet hours wrap
+midnight correctly, and the digest is marked sent only after the send succeeds.
+
+**Verified:** a new `ws` test package drives real WebSocket connections through
+an `httptest` server and proves presence announces only transitions, keep-alive
+typing frames are not rebroadcast, a disconnect clears the typing entry, and an
+unparseable frame does not drop the connection. The smoke test grew from 138 to
+**172 assertions**, covering threads, reactions, mentions, presence, documents
+with their history, and preference validation.
+
+**Two gaps the assertions found:** documents had no authorization at all — any
+authenticated user could read any document, including one in a private space —
+and revisions were stored without any way to read their text back. Both are
+closed and both now have negative tests.
+
+**Deferred, with reason:** a rich-text editor (TipTap), attachments and intake
+forms. Attachments need object storage, which is infrastructure rather than
+product; a rich-text model would replace a portable format with a proprietary
+one for a gain the Markdown editor already delivers.
+
 ---
 
 ## What is left
-
-### ⬜ Phase B3 — Collaboration
-Rich-text editor and Docs · chat threads, reactions, mentions, attachments,
-presence, typing indicators (needs a bidirectional WebSocket; today it is
-push-only) · intake forms · notification digests and granular preferences.
 
 ### ⬜ Phase C — Intelligence and enterprise
 Goals/OKRs · user-configurable dashboards · portfolio · capacity planning ·
@@ -309,11 +363,17 @@ LGPD export and erasure · backup runbooks · HA.
 
 ## Effort
 
-Phases 0, A1, A2, B1 and B2 are done. The remaining three are roughly **14
-person-weeks**, compressible to about 9–10 calendar weeks with the platform
-and product tracks running in parallel.
+Phases 0, A1, A2, A3, B1, B2 and B3 are done. Phase C is roughly **4
+person-weeks**.
 
-**A3 is now the highest-value next step**, and it has become the bottleneck:
-the timeline is built but cannot draw dependencies, custom fields have nowhere
-to live, and there is no automation engine — all of which are backend work
-that the views are already waiting on.
+**Phase C is now the only phase left, and it is the one that decides whether
+this can be deployed to an organisation rather than to a team.** SSO, SCIM
+provisioning and LGPD export/erasure are not features anyone asks for by name;
+they are the conditions under which an internal tool is allowed to hold real
+people's data. Goals/OKRs and portfolio reporting are the visible half.
+
+Also outstanding across earlier phases, none of it blocking: the load test
+behind **M3** (a 10k-task board at p95 < 100 ms), attachments and recurring
+tasks from A3, and signed webhooks — which need retry, backoff and a delivery
+log to be worth shipping, so they are a phase of their own rather than a corner
+of another.

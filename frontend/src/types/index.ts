@@ -264,6 +264,6 @@ export interface AuditEntry {
 
 // Envelope pushed by the backend over the WebSocket ("/ws?token=...").
 export interface RealtimeMessage {
-  type: 'notification' | 'chat:message';
+  type: 'notification' | 'chat:message' | 'chat:reaction' | 'presence' | 'typing';
   payload: unknown;
 }

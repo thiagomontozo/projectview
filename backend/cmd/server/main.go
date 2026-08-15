@@ -17,6 +17,8 @@ import (
 	// does not need the tzdata package for ALERT_CRON and date formatting.
 	_ "time/tzdata"
 
+	"github.com/google/uuid"
+
 	"github.com/joho/godotenv"
 
 	"projectview/internal/config"
@@ -62,6 +64,23 @@ func main() {
 
 	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier, api.Engine)
 	alertScheduler.Start()
+
+	services.NewDigestScheduler(api.Preferences, mailer).Start()
+
+	// Presence and typing payloads carry a display name, so clients do not
+	// have to hold the whole directory to render "Ana is typing".
+	hub.SetNameResolver(func(userID string) string {
+		id, err := uuid.Parse(userID)
+		if err != nil {
+			return ""
+		}
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if user, err := api.Users.ByID(lookupCtx, id); err == nil {
+			return user.Name
+		}
+		return ""
+	})
 
 	// Expired and revoked sessions accumulate forever otherwise; prune them
 	// hourly so the table stays proportional to actual usage.

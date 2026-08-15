@@ -140,33 +140,16 @@ func (a *API) GetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := a.Chat.Messages(ctx, channelID, 100)
+	// Only the roots: a reply belongs to its thread, and repeating it here
+	// would make every threaded exchange appear twice in the transcript. The
+	// reply count on each root is what tells the reader a thread is there.
+	messages, err := a.Chat.RootMessages(ctx, channelID, 100)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	authorIDs := []uuid.UUID{}
-	for _, m := range messages {
-		authorIDs = append(authorIDs, derefIDs(m.Author)...)
-	}
-	users := a.usersByID(ctx, uniqueIDs(authorIDs))
-
-	type messageResponse struct {
-		models.ChatMessage
-		Author *PublicUser `json:"author"`
-	}
-	out := make([]messageResponse, 0, len(messages))
-	for _, m := range messages {
-		mr := messageResponse{ChatMessage: m}
-		if m.Author != nil {
-			if u, ok := users[*m.Author]; ok {
-				mr.Author = &u
-			}
-		}
-		out = append(out, mr)
-	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.JSON(w, http.StatusOK, a.decorateMessages(ctx, messages))
 }
 
 type postMessageRequest struct {

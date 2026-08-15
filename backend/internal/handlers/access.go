@@ -198,12 +198,19 @@ func (a *API) requireTaskWork(w http.ResponseWriter, r *http.Request, taskID uui
 //     honoured so nothing that worked before stops working)
 // ---------------------------------------------------------------------------
 
-// requireSpaceRead loads a space the caller is allowed to see.
+// requireSpaceRead loads a space the caller is allowed to see, taking the id
+// from the ":id" URL parameter.
 func (a *API) requireSpaceRead(w http.ResponseWriter, r *http.Request) (*repo.Space, bool) {
 	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
 		return nil, false
 	}
+	return a.requireSpaceReadByID(w, r, id)
+}
+
+// requireSpaceReadByID is the same check for a space identified by something
+// other than the route - a document's container, for instance.
+func (a *API) requireSpaceReadByID(w http.ResponseWriter, r *http.Request, id uuid.UUID) (*repo.Space, bool) {
 	space, err := a.Spaces.ByID(r.Context(), id)
 	if err != nil {
 		respondRepoError(w, err, "Space not found.")
@@ -235,6 +242,20 @@ func (a *API) requireSpaceRole(w http.ResponseWriter, r *http.Request, minimum s
 	if !ok {
 		return nil, false
 	}
+	return a.enforceSpaceRole(w, r, space, minimum)
+}
+
+// requireSpaceRoleByID is requireSpaceRole for a space named by a payload
+// rather than by the route.
+func (a *API) requireSpaceRoleByID(w http.ResponseWriter, r *http.Request, id uuid.UUID, minimum string) (*repo.Space, bool) {
+	space, ok := a.requireSpaceReadByID(w, r, id)
+	if !ok {
+		return nil, false
+	}
+	return a.enforceSpaceRole(w, r, space, minimum)
+}
+
+func (a *API) enforceSpaceRole(w http.ResponseWriter, r *http.Request, space *repo.Space, minimum string) (*repo.Space, bool) {
 	user := auth.CurrentUser(r)
 	if isAdmin(user) {
 		return space, true

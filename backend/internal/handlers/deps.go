@@ -39,6 +39,8 @@ type API struct {
 	Time          *repo.TimeTracking
 	Watchers      *repo.Watchers
 	Automations   *repo.Automations
+	Docs          *repo.Docs
+	Preferences   *repo.Preferences
 	// Engine runs the automation rules. Set by main once the notifier exists,
 	// since the two depend on each other's construction order.
 	Engine *services.AutomationEngine
@@ -68,5 +70,7 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Time:          repo.NewTimeTracking(store),
 		Watchers:      repo.NewWatchers(store),
 		Automations:   repo.NewAutomations(store),
+		Docs:          repo.NewDocs(store),
+		Preferences:   repo.NewPreferences(store),
 	}
 }

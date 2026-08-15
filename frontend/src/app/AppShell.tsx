@@ -16,6 +16,7 @@ import {
   Chat,
   CheckSquare,
   Dashboard,
+  FileText,
   Folder,
   Layers,
   LogOut,
@@ -46,7 +47,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/teams', labelKey: 'nav.teams', Icon: Users },
   { to: '/resources', labelKey: 'nav.resources', Icon: Puzzle },
   { to: '/reports', labelKey: 'nav.reports', Icon: Chart },
-  { to: '/chat', labelKey: 'nav.chat', Icon: Chat }
+  { to: '/chat', labelKey: 'nav.chat', Icon: Chat },
+  { to: '/docs', labelKey: 'nav.docs', Icon: FileText }
 ];
 
 export function AppShell() {

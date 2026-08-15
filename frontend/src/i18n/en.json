@@ -34,7 +34,8 @@
     "chat": "Internal chat",
     "settings": "Settings",
     "primary": "Primary navigation",
-    "skipToContent": "Skip to content"
+    "skipToContent": "Skip to content",
+    "docs": "Docs"
   },
   "auth": {
     "signIn": "Sign in",
@@ -187,7 +188,19 @@
     "empty": "No messages yet",
     "emptyBody": "Be the first to write in this channel.",
     "noChannel": "Select a channel",
-    "noChannelBody": "Pick a channel on the left to read its messages."
+    "noChannelBody": "Pick a channel on the left to read its messages.",
+    "online": "Online",
+    "nobodyOnline": "Nobody online",
+    "typing": "{{names}} is typing...",
+    "typing_plural": "{{names}} are typing...",
+    "react": "React with {{emoji}}",
+    "reactionCount": "{{emoji}}, {{count}} person",
+    "reactionCount_plural": "{{emoji}}, {{count}} people",
+    "reply": "Reply",
+    "replies": "{{count}} reply",
+    "replies_plural": "{{count}} replies",
+    "replyPlaceholder": "Reply in thread...",
+    "thread": "Thread"
   },
   "notifications": {
     "title": "Notifications",
@@ -207,7 +220,24 @@
     "lastUsed": "Last used",
     "revoke": "End session",
     "revoked": "Session ended.",
-    "profile": "Profile"
+    "profile": "Profile",
+    "notifications": "Notifications",
+    "notificationsHint": "Choose how each kind of alert reaches you. Anything you switch off stops being sent — the digest still gathers whatever was held back.",
+    "notificationType": "Type",
+    "inApp": "In app",
+    "email": "E-mail",
+    "notif_task_assigned": "Task assigned to me",
+    "notif_task_due_soon": "Due date approaching",
+    "notif_task_overdue": "Task overdue",
+    "notif_comment_mention": "Mentioned in a comment",
+    "notif_chat_message": "Chat message",
+    "digest": "E-mail digest",
+    "digestHint": "Gathers into one message whatever was not sent immediately.",
+    "digest_off": "Off",
+    "digest_daily": "Daily",
+    "digest_weekly": "Weekly",
+    "digestHour": "Digest time",
+    "preferencesSaved": "Preferences saved"
   },
   "command": {
     "placeholder": "Search tasks or jump to...",
@@ -276,5 +306,23 @@
     "loadFull": "Near capacity",
     "loadOver": "Over {{capacity}}h/week",
     "criticalPath": "Critical path"
+  },
+  "docs": {
+    "title": "Docs",
+    "hint": "Notes, decisions and reference material, written in Markdown. Every save keeps the previous version.",
+    "new": "New document",
+    "untitled": "Untitled document",
+    "docTitle": "Document title",
+    "body": "Document body",
+    "placeholder": "Write in Markdown...",
+    "saved": "Saved",
+    "updated": "Updated",
+    "revisions": "{{count}} version",
+    "revisions_plural": "{{count}} versions",
+    "selectOne": "Select a document",
+    "empty": "No documents yet",
+    "emptyBody": "Create the first document in this space.",
+    "history": "History",
+    "restore": "Restore"
   }
 }

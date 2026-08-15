@@ -169,7 +169,23 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Post("/channels", api.CreateChannel)
 		r.Get("/channels/{channelId}/messages", api.GetMessages)
 		r.Post("/channels/{channelId}/messages", api.PostMessage)
+		r.Get("/messages/{id}/replies", api.MessageThread)
+		r.Post("/messages/{id}/replies", api.ReplyToMessage)
+		r.Post("/messages/{id}/reactions", api.ToggleReaction)
 	})
+
+	r.Route("/api/docs", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/", api.ListDocs)
+		r.Post("/", api.CreateDoc)
+		r.Get("/{id}", api.GetDoc)
+		r.Put("/{id}", api.UpdateDoc)
+		r.Delete("/{id}", api.DeleteDoc)
+		r.Get("/{id}/revisions", api.DocRevisions)
+		r.Get("/{id}/revisions/{revisionId}", api.DocRevision)
+	})
+
+	r.With(requireAuth).Get("/api/presence", api.Presence)
 
 	r.Route("/api/dashboard", func(r chi.Router) {
 		r.Use(requireAuth)
@@ -183,6 +199,8 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 	r.Route("/api/notifications", func(r chi.Router) {
 		r.Use(requireAuth)
 		r.Get("/", api.ListNotifications)
+		r.Get("/preferences", api.GetNotificationPreferences)
+		r.Put("/preferences", api.SetNotificationPreferences)
 		r.Post("/{id}/read", api.MarkNotificationRead)
 		r.Post("/read-all", api.MarkAllNotificationsRead)
 	})

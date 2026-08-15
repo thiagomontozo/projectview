@@ -31,7 +31,17 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
   e-mails are logged instead of sent, so the rest of the system keeps working.
 - **Internal chat** — team/project channels (created automatically) and direct
   messages, with history stored in PostgreSQL. Messages are sent over REST and
-  delivered in real time over WebSocket.
+  delivered in real time over WebSocket. Conversations have **threads**
+  (replies stay in the thread rather than repeating in the transcript),
+  **emoji reactions** that toggle, **@mentions** that notify only people who
+  can actually read the channel, plus **presence** and **typing indicators**.
+- **Docs** — Markdown documents per space or project, with a version kept on
+  every save that changes the text. Old versions can be read back and
+  restored. A document is exactly as visible, and exactly as editable, as the
+  space or project that contains it.
+- **Notification preferences** — per notification type and per channel (in-app
+  or e-mail), with quiet hours and an optional daily or weekly digest that
+  gathers whatever immediate delivery was turned off.
 - **Tracking charts** — task distribution by status, workload per resource,
   30-day completion trend, and progress per project.
 - **Dashboard with draggable cards** — the landing dashboard is a grid of
@@ -135,13 +145,26 @@ Internet
 
 ### About the real-time protocol
 
-Unlike a Socket.IO-style design, the WebSocket here (`/ws?token=<jwt>`) exists
-**only for the server to push events** (`notification` and `chat:message`) to
-already-connected clients. Every write — creating a task, sending a message,
-moving a kanban card — happens over an ordinary REST call; the server then
-fans the corresponding event out over the WebSocket to whoever has a tab open.
-This keeps the protocol trivial to implement in Go and easy to exercise with
-`curl`/Postman, without giving up real-time updates.
+The WebSocket (`/ws?token=<jwt>`) carries two kinds of traffic, and the split
+is deliberate.
+
+**Server → client**, the majority: `notification`, `chat:message`,
+`chat:reaction`, `presence`, `typing`. Every write — creating a task, sending a
+message, moving a kanban card — happens over an ordinary REST call, because
+that is where validation, authorization and the audit trail live. The server
+then fans the corresponding event out to whoever has a tab open, and the client
+treats it as an invalidation rather than as data: it refetches through the
+query that already knows the shape, instead of maintaining a second code path
+that can drift.
+
+**Client → server**, deliberately tiny: `typing`, `typing:stop`, `ping`.
+Nothing here is persisted and nothing is authoritative — it is state that is
+obsolete within seconds and costs nothing to lose on a reconnect. A frame the
+server cannot parse is ignored rather than treated as a reason to drop the
+connection, so a client on an older build keeps working.
+
+Because it stays this small, the protocol is trivial to implement in Go and the
+whole REST surface remains exercisable with `curl`/Postman.
 
 ## Running it (Docker)
 
@@ -393,7 +416,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-138 assertions covering the proxy (HTTPS redirect, security headers, the
+172 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
@@ -406,6 +429,15 @@ critical path, a refused cycle, custom field values surviving a partial write,
 the one-timer-per-person rule, and an automation that raises a task's priority
 when its status changes — including the run log entry proving a non-matching
 rule was recorded as skipped rather than silently ignored.
+
+The collaboration surface is covered the same way: a threaded reply that stays
+out of the channel transcript while raising the parent's reply count, a
+reaction that toggles off when tapped twice, documents whose history keeps one
+version per real change and none for an unchanged save, an old version read
+back by id, and preference validation. The negative cases matter most here — a
+member can read a document in an open space but cannot edit or delete it, and a
+private space's documents answer 404 rather than 403, so the error itself does
+not confirm they exist.
 
 **Frontend tests** — 33 assertions over the pure view logic (filtering,
 sorting, grouping) and the accessibility contracts of the primitives:
@@ -466,7 +498,14 @@ the tool is safe to re-run.
   (resource allocation), start/due dates, priority, checklist, comments and a
   log of alerts already sent.
 - **ChatChannel / ChatMessage** — team/project channels and DMs, with message
-  history.
+  history. A message may have a `parentId`, which makes it a reply; a database
+  trigger keeps threads one level deep.
+- **ChatReaction / ChatMention** — emoji reactions (unique per message, user
+  and emoji, so toggling cannot duplicate) and the record of who was named.
+- **Doc / DocRevision** — Markdown documents scoped to a space or a project,
+  with a snapshot kept for every save that changed the text.
+- **NotificationPreference** — per-user delivery choices by notification type
+  and channel, quiet hours, and digest cadence.
 - **Notification** — in-app notifications (assignments, deadlines, comments),
   delivered in real time over WebSocket.
 

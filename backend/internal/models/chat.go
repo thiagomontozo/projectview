@@ -31,11 +31,15 @@ func ValidChannelType(t string) bool {
 	return t == ChannelTypeTeam || t == ChannelTypeProject || t == ChannelTypeDM
 }
 
+// ChatMessage is one message. A reply carries ParentID; threads are one level
+// deep, enforced by a database trigger.
 type ChatMessage struct {
 	ID        uuid.UUID   `json:"id"`
 	ChannelID uuid.UUID   `json:"channel"`
 	Author    *uuid.UUID  `json:"-"`
 	Body      string      `json:"body"`
+	ParentID  *uuid.UUID  `json:"parentId,omitempty"`
+	EditedAt  *time.Time  `json:"editedAt,omitempty"`
 	ReadBy    []uuid.UUID `json:"readBy"`
 	CreatedAt time.Time   `json:"createdAt"`
 	UpdatedAt time.Time   `json:"updatedAt"`

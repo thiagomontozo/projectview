@@ -7,7 +7,12 @@ import { SkeletonList } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
 import { useAuth } from '../lib/auth';
 import { useTheme, type ThemePreference } from '../lib/theme';
-import { useRevokeSession, useSessions } from '../lib/queries';
+import {
+  useNotificationPreferences,
+  useRevokeSession,
+  useSaveNotificationPreferences,
+  useSessions
+} from '../lib/queries';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import { Shield, Monitor } from '../ui/icons';
 import controls from '../ui/controls.module.css';
@@ -80,8 +85,145 @@ export default function SettingsPage() {
         </Card>
       </div>
 
+      <NotificationPreferencesCard />
+
       <SessionsCard />
     </>
+  );
+}
+
+const NOTIFICATION_TYPES = [
+  'task_assigned',
+  'task_due_soon',
+  'task_overdue',
+  'comment_mention',
+  'chat_message'
+] as const;
+
+/**
+ * Per-type delivery choices, a digest, and quiet hours.
+ *
+ * The point of the digest is that someone can turn immediate e-mail off
+ * without going blind: notifications still accumulate in the app and arrive
+ * once a day as a single message. Quiet hours do the same for a window.
+ */
+function NotificationPreferencesCard() {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { data: prefs, isLoading } = useNotificationPreferences();
+  const save = useSaveNotificationPreferences();
+
+  if (isLoading || !prefs) {
+    return (
+      <Card>
+        <CardHeader title={t('settings.notifications')} />
+        <SkeletonList rows={3} height={36} label={t('common.loading')} />
+      </Card>
+    );
+  }
+
+  const update = (next: Partial<typeof prefs>) =>
+    save.mutate({ ...prefs, ...next }, { onSuccess: () => toast.success(t('settings.preferencesSaved')) });
+
+  const toggleChannel = (type: string, channel: 'inApp' | 'email') => {
+    const current = prefs.channels[type] ?? { inApp: true, email: false };
+    update({
+      channels: { ...prefs.channels, [type]: { ...current, [channel]: !current[channel] } }
+    });
+  };
+
+  return (
+    <div className={styles.settingsSection}>
+      <Card>
+        <CardHeader title={t('settings.notifications')} />
+        <p className={styles.muted} style={{ marginBottom: 'var(--space-4)' }}>
+          {t('settings.notificationsHint')}
+        </p>
+
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th scope="col">{t('settings.notificationType')}</th>
+                <th scope="col">{t('settings.inApp')}</th>
+                <th scope="col">{t('settings.email')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {NOTIFICATION_TYPES.map((type) => {
+                const channel = prefs.channels[type] ?? { inApp: true, email: false };
+                return (
+                  <tr key={type}>
+                    <td>{t(`settings.notif_${type}`)}</td>
+                    <td>
+                      <SwitchPrimitive.Root
+                        className={controls.switchRoot}
+                        checked={channel.inApp}
+                        onCheckedChange={() => toggleChannel(type, 'inApp')}
+                        aria-label={`${t(`settings.notif_${type}`)} — ${t('settings.inApp')}`}
+                      >
+                        <SwitchPrimitive.Thumb className={controls.switchThumb} />
+                      </SwitchPrimitive.Root>
+                    </td>
+                    <td>
+                      <SwitchPrimitive.Root
+                        className={controls.switchRoot}
+                        checked={channel.email}
+                        onCheckedChange={() => toggleChannel(type, 'email')}
+                        aria-label={`${t(`settings.notif_${type}`)} — ${t('settings.email')}`}
+                      >
+                        <SwitchPrimitive.Thumb className={controls.switchThumb} />
+                      </SwitchPrimitive.Root>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className={styles.settingRow} style={{ marginTop: 'var(--space-4)' }}>
+          <label>
+            {t('settings.digest')}
+            <span className={styles.subtle} style={{ display: 'block' }}>
+              {t('settings.digestHint')}
+            </span>
+          </label>
+          <div className={controls.segmented}>
+            {(['off', 'daily', 'weekly'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={clsx(controls.segment, prefs.digest === option && controls.segmentActive)}
+                aria-pressed={prefs.digest === option}
+                onClick={() => update({ digest: option })}
+              >
+                {t(`settings.digest_${option}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {prefs.digest !== 'off' && (
+          <div className={styles.settingRow}>
+            <label htmlFor="digest-hour">{t('settings.digestHour')}</label>
+            <select
+              id="digest-hour"
+              className={controls.input}
+              style={{ width: 100 }}
+              value={prefs.digestHour}
+              onChange={(event) => update({ digestHour: Number(event.target.value) })}
+            >
+              {Array.from({ length: 24 }, (_, hour) => (
+                <option key={hour} value={hour}>
+                  {String(hour).padStart(2, '0')}:00
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 
