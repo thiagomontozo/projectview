@@ -75,10 +75,10 @@ func TestLoadDefaultsKeepIntegrationsDisabled(t *testing.T) {
 
 	cfg := Load()
 
-	if cfg.AD.Enabled {
+	if cfg.AD().Enabled {
 		t.Error("AD is enabled by default")
 	}
-	if cfg.SMTP.Enabled {
+	if cfg.SMTP().Enabled {
 		t.Error("SMTP is enabled by default")
 	}
 	if cfg.Database.URL == "" {
@@ -87,11 +87,11 @@ func TestLoadDefaultsKeepIntegrationsDisabled(t *testing.T) {
 	if cfg.Database.MaxConns <= 0 {
 		t.Errorf("DATABASE_MAX_CONNS default = %d, want a positive number", cfg.Database.MaxConns)
 	}
-	if cfg.Alerts.CronExpr == "" {
+	if cfg.Alerts().CronExpr == "" {
 		t.Error("ALERT_CRON has no default")
 	}
-	if cfg.Alerts.WarnDaysBefore <= 0 {
-		t.Errorf("ALERT_WARN_DAYS_BEFORE default = %d, want a positive number", cfg.Alerts.WarnDaysBefore)
+	if cfg.Alerts().WarnDaysBefore <= 0 {
+		t.Errorf("ALERT_WARN_DAYS_BEFORE default = %d, want a positive number", cfg.Alerts().WarnDaysBefore)
 	}
 }
 
@@ -112,17 +112,17 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	if cfg.Database.MaxConns != 25 {
 		t.Errorf("Database.MaxConns = %d, want 25", cfg.Database.MaxConns)
 	}
-	if !cfg.AD.Enabled {
+	if !cfg.AD().Enabled {
 		t.Error("AD.Enabled = false, want true")
 	}
-	if cfg.AD.URL != "ldaps://dc.corp.example:636" {
-		t.Errorf("AD.URL = %q", cfg.AD.URL)
+	if cfg.AD().URL != "ldaps://dc.corp.example:636" {
+		t.Errorf("AD.URL = %q", cfg.AD().URL)
 	}
-	if !cfg.SMTP.Enabled {
+	if !cfg.SMTP().Enabled {
 		t.Error("SMTP.Enabled = false, want true")
 	}
-	if cfg.SMTP.Port != 2525 {
-		t.Errorf("SMTP.Port = %d, want 2525", cfg.SMTP.Port)
+	if cfg.SMTP().Port != 2525 {
+		t.Errorf("SMTP.Port = %d, want 2525", cfg.SMTP().Port)
 	}
 	if cfg.JWT.ExpiresInHours != 12 {
 		t.Errorf("JWT.ExpiresInHours = %d, want 12", cfg.JWT.ExpiresInHours)

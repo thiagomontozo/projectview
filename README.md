@@ -94,6 +94,11 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
 - **Privacy** — self-service data export, administrator-performed erasure that
   anonymises rather than deletes, and optional retention windows for the audit
   trail and read notifications.
+- **Settings screen for administrators** — AD/LDAP, SMTP, single sign-on,
+  alert lead time and retention are editable in the application and take
+  effect immediately, with no restart. Only administrators may read or change
+  them, credentials are stored encrypted and never read back, and every change
+  is recorded in the audit trail.
 - **Fully containerized** with Docker Compose (proxy, frontend, backend,
   PostgreSQL).
 
@@ -394,6 +399,37 @@ Setup, backup/restore and the two privacy rights are covered in
 - **Data export** is self-service; **erasure** is an administrator's action,
   requires the username as confirmation, and anonymises rather than deletes.
 
+## Configuration: environment, then the settings screen
+
+The environment supplies the starting values. An administrator can then change
+the integrations from **Administration → System settings**, which stores the
+override in PostgreSQL and applies it to the running process at once — the next
+login uses the new directory, the next notification the new mail server.
+
+Three properties are deliberate:
+
+- **An allow-list, not a deny-list.** Only AD, SMTP, OIDC, the alert lead time
+  and the retention windows are editable. `DATABASE_URL`, `JWT_SECRET`, the
+  bootstrap admin and the ports are not, and the server refuses them by name.
+  None could be applied without a restart anyway, and an installation able to
+  rewrite its own database connection from a web form is one compromised
+  administrator away from being somebody else's.
+- **Secrets go in encrypted and never come back out.** Bind passwords, the SMTP
+  password and the client secret are sealed with a key derived from
+  `JWT_SECRET`. The screen shows only whether a value is set; leaving the field
+  blank keeps what is stored, so saving the form without retyping a password
+  cannot wipe it.
+- **The database is authoritative; the `.env` mirror is a copy.** Saving also
+  writes a `.env`-shaped file (`SETTINGS_ENV_FILE`, mounted at `./config` by
+  default) for backup and review, updating only the keys it manages and leaving
+  your comments and unrelated variables untouched. The application does not read
+  it back — compose interpolates its environment once, at parse time, so a file
+  the application rewrote would need a restart to matter, which is the delay the
+  screen exists to remove.
+
+Clearing an override reverts the key to whatever the environment supplied,
+rather than to empty.
+
 ## Main environment variables
 
 See [.env.example](.env.example) for the full, commented list. Summary:
@@ -409,6 +445,7 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 | `BOOTSTRAP_ADMIN_*` | Admin account seeded on first run |
 | `OIDC_ENABLED`, `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_AUTO_PROVISION` | Single sign-on |
 | `AUDIT_RETENTION_DAYS`, `NOTIFICATION_RETENTION_DAYS`, `RETENTION_CRON` | Retention; both windows default to 0, which keeps everything |
+| `SETTINGS_ENV_FILE` | Where the settings screen mirrors its `.env` copy; empty disables mirroring |
 | `TLS_COMMON_NAME`, `PROXY_HTTP_PORT`, `PROXY_HTTPS_PORT` | Edge proxy and TLS |
 
 ## Local development (without Docker)
@@ -456,7 +493,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-247 assertions covering the proxy (HTTPS redirect, security headers, the
+270 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
@@ -556,6 +593,8 @@ the tool is safe to re-run.
   compare the schedule against itself and report perfection forever.
 - **Dashboard** — one saved card layout per person, with a partial unique index
   enforcing a single default.
+- **AppSetting** — one row per configuration override, with who changed it and
+  when. Secrets are stored sealed rather than in the clear.
 - **ServiceToken** — machine credentials for SCIM and reporting. Only the hash
   is stored: a token the database can hand back is a token every database
   administrator has silently been issued.

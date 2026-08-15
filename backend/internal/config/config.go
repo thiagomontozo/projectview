@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // DatabaseConfig points at PostgreSQL. It replaces the previous MongoConfig:
@@ -90,19 +91,100 @@ type RetentionConfig struct {
 	NotificationDays int
 }
 
+// Config holds everything the process needs.
+//
+// The integrations an administrator can change from the settings screen -
+// AD, SMTP, OIDC, and the two numeric thresholds - live behind accessors and
+// a lock rather than as plain fields. Two reasons: a saved change has to take
+// effect on the next login or the next e-mail without a restart, and a
+// background goroutine reading a struct another goroutine is writing is a data
+// race however harmless the values look.
+//
+// Everything else - the database URL, the signing secret, ports - stays a
+// plain field. Those cannot be applied without a restart anyway, and a running
+// installation that can rewrite its own database connection or token secret
+// from a web form is one compromised administrator away from being somebody
+// else's.
 type Config struct {
 	NodeEnv    string
 	Port       string
 	Log        LogConfig
 	Database   DatabaseConfig
 	JWT        JWTConfig
-	AD         ADConfig
-	SMTP       SMTPConfig
-	Alerts     AlertsConfig
 	Bootstrap  BootstrapConfig
-	OIDC       OIDCConfig
-	Retention  RetentionConfig
 	CORSOrigin string
+
+	mu sync.RWMutex
+	// The values as the environment supplied them. Kept so that clearing an
+	// override reverts to the deployment's own configuration rather than to an
+	// empty string.
+	baseline  runtimeSettings
+	effective runtimeSettings
+}
+
+// runtimeSettings groups the sections a settings change may replace.
+type runtimeSettings struct {
+	AD        ADConfig
+	SMTP      SMTPConfig
+	OIDC      OIDCConfig
+	Alerts    AlertsConfig
+	Retention RetentionConfig
+}
+
+// AD returns a copy of the current directory settings.
+func (c *Config) AD() ADConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.AD
+}
+
+func (c *Config) SMTP() SMTPConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.SMTP
+}
+
+func (c *Config) OIDC() OIDCConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.OIDC
+}
+
+func (c *Config) Alerts() AlertsConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.Alerts
+}
+
+func (c *Config) Retention() RetentionConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.Retention
+}
+
+// Baseline reports what the environment supplied for a managed key, so the
+// settings screen can show what a value would revert to if the override were
+// removed.
+func (c *Config) Baseline() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return flatten(c.baseline)
+}
+
+// Effective reports the values actually in force.
+func (c *Config) Effective() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return flatten(c.effective)
+}
+
+// Apply replaces the managed settings with the environment baseline plus the
+// given overrides. Called once at boot with whatever is stored, and again on
+// every save, so the two paths cannot drift.
+func (c *Config) Apply(overrides map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.effective = merge(c.baseline, overrides)
 }
 
 func getenv(key, fallback string) string {
@@ -143,7 +225,7 @@ func getint(key string, fallback int) int {
 // Load reads configuration from the environment (a .env file, if present,
 // should be loaded by the process before calling this - see cmd/server/main.go).
 func Load() *Config {
-	return &Config{
+	cfg := &Config{
 		NodeEnv: getenv("NODE_ENV", "development"),
 		Port:    getenv("PORT", "4000"),
 
@@ -163,6 +245,17 @@ func Load() *Config {
 			RefreshDays:    getint("SESSION_REFRESH_DAYS", 30),
 		},
 
+		Bootstrap: BootstrapConfig{
+			AdminUsername: getenv("BOOTSTRAP_ADMIN_USERNAME", "admin"),
+			AdminEmail:    getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com"),
+			AdminName:     getenv("BOOTSTRAP_ADMIN_NAME", "Administrator"),
+			AdminPassword: getenv("BOOTSTRAP_ADMIN_PASSWORD", "ChangeMe123!"),
+		},
+
+		CORSOrigin: getenv("CORS_ORIGIN", "*"),
+	}
+
+	cfg.baseline = runtimeSettings{
 		AD: ADConfig{
 			Enabled:               getbool("AD_ENABLED", false),
 			URL:                   getenv("AD_URL", "ldap://dc.example.com:389"),
@@ -183,18 +276,6 @@ func Load() *Config {
 			FromAddress: getenv("SMTP_FROM", "PM Dashboard <no-reply@example.com>"),
 		},
 
-		Alerts: AlertsConfig{
-			CronExpr:       getenv("ALERT_CRON", "0 * * * *"),
-			WarnDaysBefore: getint("ALERT_WARN_DAYS_BEFORE", 2),
-		},
-
-		Bootstrap: BootstrapConfig{
-			AdminUsername: getenv("BOOTSTRAP_ADMIN_USERNAME", "admin"),
-			AdminEmail:    getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com"),
-			AdminName:     getenv("BOOTSTRAP_ADMIN_NAME", "Administrator"),
-			AdminPassword: getenv("BOOTSTRAP_ADMIN_PASSWORD", "ChangeMe123!"),
-		},
-
 		OIDC: OIDCConfig{
 			Enabled:       getbool("OIDC_ENABLED", false),
 			IssuerURL:     getenv("OIDC_ISSUER_URL", ""),
@@ -205,12 +286,20 @@ func Load() *Config {
 			AutoProvision: getbool("OIDC_AUTO_PROVISION", false),
 		},
 
+		Alerts: AlertsConfig{
+			CronExpr:       getenv("ALERT_CRON", "0 * * * *"),
+			WarnDaysBefore: getint("ALERT_WARN_DAYS_BEFORE", 2),
+		},
+
 		Retention: RetentionConfig{
 			CronExpr:         getenv("RETENTION_CRON", "30 3 * * *"),
 			AuditDays:        getint("AUDIT_RETENTION_DAYS", 0),
 			NotificationDays: getint("NOTIFICATION_RETENTION_DAYS", 0),
 		},
-
-		CORSOrigin: getenv("CORS_ORIGIN", "*"),
 	}
+
+	// Nothing is overridden yet: the caller loads the stored settings and
+	// calls Apply once the database is reachable.
+	cfg.effective = cfg.baseline
+	return cfg
 }

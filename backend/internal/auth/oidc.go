@@ -53,7 +53,16 @@ func NewOIDC(cfg *config.Config) *OIDC {
 	return &OIDC{cfg: cfg, client: &http.Client{Timeout: 15 * time.Second}}
 }
 
-func (o *OIDC) Enabled() bool { return o.cfg.OIDC.Enabled }
+func (o *OIDC) Enabled() bool { return o.cfg.OIDC().Enabled }
+
+// ForgetDiscovery drops the cached metadata, so the next sign-in re-reads it.
+// Called when the settings change: a new issuer must not keep talking to the
+// endpoints of the old one for up to an hour.
+func (o *OIDC) ForgetDiscovery() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.discovery = nil
+}
 
 // discover fetches and caches the provider's metadata. Cached for an hour: the
 // document changes when a provider rotates endpoints, which is rare, and
@@ -67,7 +76,8 @@ func (o *OIDC) discover(ctx context.Context) (*discoveryDocument, error) {
 		return o.discovery, nil
 	}
 
-	endpoint := strings.TrimSuffix(o.cfg.OIDC.IssuerURL, "/") + "/.well-known/openid-configuration"
+	oidc := o.cfg.OIDC()
+	endpoint := strings.TrimSuffix(oidc.IssuerURL, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -122,14 +132,15 @@ func (o *OIDC) Start(ctx context.Context) (*AuthRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+	oidc := o.cfg.OIDC()
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
 	params := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {o.cfg.OIDC.ClientID},
-		"redirect_uri":          {o.cfg.OIDC.RedirectURL},
-		"scope":                 {o.cfg.OIDC.Scopes},
+		"client_id":             {oidc.ClientID},
+		"redirect_uri":          {oidc.RedirectURL},
+		"scope":                 {oidc.Scopes},
 		"state":                 {state},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
@@ -165,12 +176,13 @@ func (o *OIDC) Exchange(ctx context.Context, code, verifier string) (*OIDCProfil
 		return nil, err
 	}
 
+	oidc := o.cfg.OIDC()
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"redirect_uri":  {o.cfg.OIDC.RedirectURL},
-		"client_id":     {o.cfg.OIDC.ClientID},
-		"client_secret": {o.cfg.OIDC.ClientSecret},
+		"redirect_uri":  {oidc.RedirectURL},
+		"client_id":     {oidc.ClientID},
+		"client_secret": {oidc.ClientSecret},
 		"code_verifier": {verifier},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, doc.TokenURL, strings.NewReader(form.Encode()))

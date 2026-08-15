@@ -35,17 +35,17 @@ func NewAlertScheduler(tasks *repo.Tasks, cfg *config.Config, notifier *Notifier
 
 func (s *AlertScheduler) Start() {
 	c := cron.New()
-	_, err := c.AddFunc(s.cfg.Alerts.CronExpr, func() {
+	_, err := c.AddFunc(s.cfg.Alerts().CronExpr, func() {
 		if err := s.RunDeadlineCheck(context.Background()); err != nil {
 			logger.Error("deadline alert sweep failed: %v", err)
 		}
 	})
 	if err != nil {
-		logger.Error("invalid ALERT_CRON expression %q: %v", s.cfg.Alerts.CronExpr, err)
+		logger.Error("invalid ALERT_CRON expression %q: %v", s.cfg.Alerts().CronExpr, err)
 		return
 	}
 	c.Start()
-	logger.Info("Deadline alert scheduler starting with cron %q", s.cfg.Alerts.CronExpr)
+	logger.Info("Deadline alert scheduler starting with cron %q", s.cfg.Alerts().CronExpr)
 
 	// Also run once shortly after boot so alerts don't wait a full cron cycle.
 	go func() {
@@ -57,7 +57,7 @@ func (s *AlertScheduler) Start() {
 }
 
 func (s *AlertScheduler) RunDeadlineCheck(ctx context.Context) error {
-	threshold := time.Now().Add(time.Duration(s.cfg.Alerts.WarnDaysBefore) * 24 * time.Hour)
+	threshold := time.Now().Add(time.Duration(s.cfg.Alerts().WarnDaysBefore) * 24 * time.Hour)
 
 	pending, err := s.tasks.PendingDeadlineAlerts(ctx, threshold)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *AlertScheduler) RunDeadlineCheck(ctx context.Context) error {
 		notifType := models.NotifTaskDueSoon
 		title := fmt.Sprintf("Due soon: %q", alert.Title)
 		body := fmt.Sprintf("This task is due on %s (within %d day(s)).",
-			alert.DueDate.Format("Jan 2, 2006"), s.cfg.Alerts.WarnDaysBefore)
+			alert.DueDate.Format("Jan 2, 2006"), s.cfg.Alerts().WarnDaysBefore)
 
 		if alert.Overdue {
 			alertType = models.AlertTypeOverdue

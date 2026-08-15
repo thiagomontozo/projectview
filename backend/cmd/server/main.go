@@ -56,7 +56,27 @@ func main() {
 	}
 	cancel()
 
+	// Stored settings override the environment, and they must be in force
+	// before anything reads the configuration - the alert scheduler and the
+	// OIDC client both capture it at construction.
+	settingsCtx, cancelSettings := context.WithTimeout(context.Background(), 10*time.Second)
+	if overrides, err := api.Settings.Overrides(settingsCtx); err != nil {
+		logger.Error("could not load saved settings, using the environment alone: %v", err)
+	} else if len(overrides) > 0 {
+		cfg.Apply(overrides)
+		logger.Info("Applied %d saved setting(s) over the environment", len(overrides))
+	}
+	cancelSettings()
+
+	// The mirror is a copy for backup and review; the database is what the
+	// process actually reads. Disabled when no path is configured.
+	api.EnvMirror = services.NewEnvMirror(os.Getenv("SETTINGS_ENV_FILE"))
+	if api.EnvMirror.Enabled() {
+		logger.Info("Settings mirror: %s", api.EnvMirror.Path())
+	}
+
 	mailer := services.NewMailer(cfg)
+	api.Mailer = mailer
 	notifier := services.NewNotifier(api.Notifications, api.Users, hub, mailer)
 
 	// The engine needs the notifier, and the handlers need the engine, so it
@@ -70,12 +90,12 @@ func main() {
 
 	// Retention does nothing unless a policy is configured; see the comment on
 	// RetentionSweeper for why the default is to keep everything.
-	services.NewRetentionSweeper(api.Privacy, cfg.Retention).Start()
+	services.NewRetentionSweeper(api.Privacy, cfg).Start()
 
-	if cfg.OIDC.Enabled {
+	if cfg.OIDC().Enabled {
 		api.OIDC = auth.NewOIDC(cfg)
 		logger.Info("Single sign-on enabled against %s (auto-provision: %v)",
-			cfg.OIDC.IssuerURL, cfg.OIDC.AutoProvision)
+			cfg.OIDC().IssuerURL, cfg.OIDC().AutoProvision)
 	}
 
 	// Presence and typing payloads carry a display name, so clients do not
@@ -109,8 +129,8 @@ func main() {
 
 	go func() {
 		logger.Info("API + WebSocket server listening on port %s (env: %s)", cfg.Port, cfg.NodeEnv)
-		logger.Info("AD authentication: %s", enabledLabel(cfg.AD.Enabled))
-		logger.Info("SMTP email: %s", enabledLabel(cfg.SMTP.Enabled))
+		logger.Info("AD authentication: %s", enabledLabel(cfg.AD().Enabled))
+		logger.Info("SMTP email: %s", enabledLabel(cfg.SMTP().Enabled))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error: %v", err)
 			os.Exit(1)

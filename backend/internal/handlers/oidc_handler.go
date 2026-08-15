@@ -168,7 +168,7 @@ func (a *API) resolveSSOUser(r *http.Request, subject, username, name, email str
 		}
 	}
 
-	if !a.Cfg.OIDC.AutoProvision {
+	if !a.Cfg.OIDC().AutoProvision {
 		return nil, errNoAccount
 	}
 

@@ -74,6 +74,11 @@ const (
 	ActionRetention    = "privacy.retention_purge"
 	ActionSCIMProvison = "scim.provisioned"
 
+	// Configuration decides who may sign in and where mail goes, so a change
+	// to it is as material as a permission change.
+	ActionSettingsChanged  = "settings.changed"
+	ActionSettingsExported = "settings.exported"
+
 	ActionPermissionDenied = "access.denied"
 )
 

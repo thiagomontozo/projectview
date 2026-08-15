@@ -104,7 +104,8 @@ export const keys = {
   earnedValue: (projectId: string) => ['projects', projectId, 'earned-value'] as const,
   dashboardLayout: ['dashboard', 'layout'] as const,
   serviceTokens: ['service-tokens'] as const,
-  ssoConfig: ['auth', 'oidc-config'] as const
+  ssoConfig: ['auth', 'oidc-config'] as const,
+  adminSettings: ['settings'] as const
 };
 
 /* --- Fetchers ---------------------------------------------------------------- */

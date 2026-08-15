@@ -139,6 +139,18 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 
 	r.With(requireAuth).Delete("/api/baselines/{id}", api.DeleteBaseline)
 
+	// Configuration decides who may sign in and where mail goes. Reading it is
+	// close to being able to take the installation over, so the whole group is
+	// administrators only - reads included.
+	r.Route("/api/settings", func(r chi.Router) {
+		r.Use(requireAuth, auth.RequireRole(models.RoleAdmin))
+		r.Get("/", api.GetSettings)
+		r.Put("/", api.SaveSettings)
+		r.Get("/env", api.DownloadEnv)
+		r.Post("/test/smtp", api.TestSMTP)
+		r.Post("/test/ad", api.TestAD)
+	})
+
 	// Machine credentials are administrative: a token is a way in that outlives
 	// whoever created it.
 	r.Route("/api/service-tokens", func(r chi.Router) {

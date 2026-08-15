@@ -758,3 +758,30 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Administration: integration settings --------------------------------------- */
+.settingLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settingKey {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.settingControl {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.settingControl input,
+.settingControl select {
+  min-width: 220px;
+}

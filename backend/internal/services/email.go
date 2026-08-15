@@ -23,24 +23,27 @@ func NewMailer(cfg *config.Config) *Mailer {
 // message so the rest of the app keeps working in environments without
 // mail access (e.g. local development).
 func (m *Mailer) Send(to, subject, htmlBody string) error {
-	if !m.cfg.SMTP.Enabled {
+	// Named so it does not shadow net/smtp, which this function also uses.
+	settings := m.cfg.SMTP()
+
+	if !settings.Enabled {
 		logger.Info("[email disabled] Would send %q to %s", subject, to)
 		return nil
 	}
 
-	from := m.cfg.SMTP.FromAddress
+	from := settings.FromAddress
 	fromAddr := from
 	if idx := strings.LastIndex(from, "<"); idx != -1 {
 		fromAddr = strings.TrimSuffix(from[idx+1:], ">")
 	}
 
-	addr := fmt.Sprintf("%s:%d", m.cfg.SMTP.Host, m.cfg.SMTP.Port)
+	addr := fmt.Sprintf("%s:%d", settings.Host, settings.Port)
 
 	msg := buildMessage(from, to, subject, htmlBody)
 
 	var auth smtp.Auth
-	if m.cfg.SMTP.User != "" {
-		auth = smtp.PlainAuth("", m.cfg.SMTP.User, m.cfg.SMTP.Password, m.cfg.SMTP.Host)
+	if settings.User != "" {
+		auth = smtp.PlainAuth("", settings.User, settings.Password, settings.Host)
 	}
 
 	if err := smtp.SendMail(addr, auth, fromAddr, []string{to}, msg); err != nil {

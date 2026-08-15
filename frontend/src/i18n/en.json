@@ -37,7 +37,8 @@
     "skipToContent": "Skip to content",
     "docs": "Docs",
     "goals": "Goals",
-    "portfolio": "Portfolio"
+    "portfolio": "Portfolio",
+    "adminSettings": "Administration"
   },
   "auth": {
     "signIn": "Sign in",
@@ -423,5 +424,41 @@
     "eac": "Estimate at completion (EAC)",
     "eacHint": "Assumes current efficiency",
     "vac": "Variance at completion (VAC)"
+  },
+  "admin": {
+    "title": "System settings",
+    "hint": "Integrations an administrator can change without a redeploy. Changes take effect immediately — no restart needed.",
+    "restricted": "Restricted",
+    "restrictedBody": "These settings decide who may sign in and where e-mail goes. Only administrators can read or change them.",
+    "saved": "Settings saved and applied",
+    "downloadEnv": "Download .env",
+    "mirrorOn": "Mirrored to {{path}}. The database is authoritative; the file is for backup and review.",
+    "mirrorOff": "File mirroring is off. Set SETTINGS_ENV_FILE to enable it.",
+    "group_ad": "Active Directory / LDAP",
+    "groupHint_ad": "Authentication against the company directory. Local accounts keep working.",
+    "group_smtp": "E-mail (SMTP)",
+    "groupHint_smtp": "Used for deadline alerts, assignments and digests. Switched off, messages go to the log.",
+    "group_oidc": "Single sign-on (OIDC)",
+    "groupHint_oidc": "Sign in through an identity provider. Register the redirect URL with the provider exactly as written here.",
+    "group_alerts": "Deadline alerts",
+    "groupHint_alerts": "How many days before a due date each assignee is warned.",
+    "group_retention": "Retention",
+    "groupHint_retention": "Zero keeps everything. Unread notifications are never expired.",
+    "fromEnvironment": "From the environment",
+    "overridden": "Changed here",
+    "reset": "Back to default",
+    "willReset": "Will be restored",
+    "on": "On",
+    "off": "Off",
+    "secretSet": "Stored — leave blank to keep",
+    "secretEmpty": "Not set",
+    "testSmtp": "Test delivery",
+    "testHint": "Sends a real message with the settings in force. Save before testing.",
+    "testTo": "someone@company.com",
+    "testSent": "Message sent to {{to}}",
+    "testAd": "Test authentication",
+    "testAdHint": "Tries a bind against the directory. The credentials are used for this attempt only and are never stored.",
+    "testBound": "Authenticated as {{name}}",
+    "runTest": "Test"
   }
 }

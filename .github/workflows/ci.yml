@@ -156,6 +156,7 @@ jobs:
                    chat_reactions chat_mentions docs doc_revisions \
                    notification_preferences \
                    goals key_results dashboards project_baselines service_tokens \
+                   app_settings \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
@@ -176,7 +177,8 @@ jobs:
 
           # Every migration must be recorded, so a restart does not re-run one.
           for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy \
-                   0004_product_engine 0005_collaboration 0006_enterprise; do
+                   0004_product_engine 0005_collaboration 0006_enterprise \
+                   0007_app_settings; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done
@@ -194,6 +196,14 @@ jobs:
           plaintext="$(psql "SELECT count(*) FROM information_schema.columns
                               WHERE table_name='service_tokens' AND column_name IN ('token','secret')")"
           [ "$plaintext" = "0" ] || { echo "service_tokens stores a plaintext secret" >&2; exit 1; }
+
+          # A saved credential must never be readable from the database. The
+          # settings screen writes secrets sealed with a key derived from
+          # JWT_SECRET, so a dump does not hand over the directory bind
+          # password and the mail account alongside it.
+          psql "SELECT count(*) FROM information_schema.columns
+                 WHERE table_name='app_settings' AND column_name='is_secret'" | grep -qx 1 \
+            || { echo "app_settings cannot distinguish secrets" >&2; exit 1; }
 
           # Erasure needs somewhere to record that it happened, or a second
           # request would rename the tombstone again.

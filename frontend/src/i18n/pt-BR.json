@@ -37,7 +37,8 @@
     "skipToContent": "Pular para o conteúdo",
     "docs": "Documentos",
     "goals": "Metas",
-    "portfolio": "Portfólio"
+    "portfolio": "Portfólio",
+    "adminSettings": "Administração"
   },
   "auth": {
     "signIn": "Entrar",
@@ -423,5 +424,41 @@
     "eac": "Estimativa final (EAC)",
     "eacHint": "Supõe a eficiência atual",
     "vac": "Variação final (VAC)"
+  },
+  "admin": {
+    "title": "Configurações do sistema",
+    "hint": "Integrações que um administrador pode alterar sem novo deploy. As mudanças passam a valer na hora — não é preciso reiniciar.",
+    "restricted": "Acesso restrito",
+    "restrictedBody": "Estas configurações decidem quem entra no sistema e para onde vão os e-mails. Só administradores podem vê-las ou alterá-las.",
+    "saved": "Configurações salvas e aplicadas",
+    "downloadEnv": "Baixar .env",
+    "mirrorOn": "Espelhado em {{path}}. O banco é a fonte de verdade; o arquivo serve para backup e conferência.",
+    "mirrorOff": "Espelhamento em arquivo desligado. Defina SETTINGS_ENV_FILE para ativá-lo.",
+    "group_ad": "Active Directory / LDAP",
+    "groupHint_ad": "Autenticação contra o diretório da empresa. Contas locais continuam funcionando.",
+    "group_smtp": "E-mail (SMTP)",
+    "groupHint_smtp": "Usado para alertas de prazo, atribuições e resumos. Desligado, as mensagens vão para o log.",
+    "group_oidc": "Login único (OIDC)",
+    "groupHint_oidc": "Entrar por um provedor de identidade. Registre a URL de retorno no provedor exatamente como escrita aqui.",
+    "group_alerts": "Alertas de prazo",
+    "groupHint_alerts": "Quantos dias antes do vencimento avisar cada responsável.",
+    "group_retention": "Retenção",
+    "groupHint_retention": "Zero mantém tudo. Notificações não lidas nunca são apagadas.",
+    "fromEnvironment": "Vindo do ambiente",
+    "overridden": "Alterado aqui",
+    "reset": "Voltar ao padrão",
+    "willReset": "Será restaurado",
+    "on": "Ligado",
+    "off": "Desligado",
+    "secretSet": "Guardado — deixe em branco para manter",
+    "secretEmpty": "Não configurado",
+    "testSmtp": "Testar envio",
+    "testHint": "Envia uma mensagem real com as configurações em vigor. Salve antes de testar.",
+    "testTo": "destinatario@empresa.com",
+    "testSent": "Mensagem enviada para {{to}}",
+    "testAd": "Testar autenticação",
+    "testAdHint": "Tenta autenticar no diretório. As credenciais são usadas apenas nesta tentativa e não são guardadas.",
+    "testBound": "Autenticado como {{name}}",
+    "runTest": "Testar"
   }
 }

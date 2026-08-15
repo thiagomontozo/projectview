@@ -312,3 +312,64 @@ export function useUpdateUser() {
     }
   });
 }
+
+/* --- Administration: integration settings --------------------------------------- */
+
+export interface AdminSetting {
+  key: string;
+  group: 'ad' | 'smtp' | 'oidc' | 'alerts' | 'retention';
+  kind: 'text' | 'secret' | 'bool' | 'number';
+  secret: boolean;
+  /** Absent for secrets: a stored credential is never read back. */
+  value?: string;
+  isSet: boolean;
+  baseline?: string;
+  /** True when somebody saved it here, false when it came from the deployment. */
+  overridden: boolean;
+  updatedAt?: string;
+}
+
+export interface AdminSettingsResponse {
+  settings: AdminSetting[];
+  mirror: { enabled: boolean; path: string };
+}
+
+export function useAdminSettings(enabled = true) {
+  return useQuery({
+    queryKey: keys.adminSettings,
+    queryFn: () => get<AdminSettingsResponse>('/settings'),
+    enabled,
+    retry: false
+  });
+}
+
+export function useSaveAdminSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { values: Record<string, string>; clear: string[] }) =>
+      api.put<{ ok: boolean; warning?: string }>('/settings', body).then((r) => r.data),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.adminSettings });
+      // Whether single sign-on is offered on the login screen depends on these.
+      client.invalidateQueries({ queryKey: keys.ssoConfig });
+    }
+  });
+}
+
+export function useTestSMTP() {
+  return useMutation({
+    mutationFn: (body: { to?: string }) =>
+      api
+        .post<{ ok: boolean; sentTo?: string; error?: string }>('/settings/test/smtp', body)
+        .then((r) => r.data)
+  });
+}
+
+export function useTestAD() {
+  return useMutation({
+    mutationFn: (body: { username: string; password: string }) =>
+      api
+        .post<{ ok: boolean; name?: string; email?: string; error?: string }>('/settings/test/ad', body)
+        .then((r) => r.data)
+  });
+}

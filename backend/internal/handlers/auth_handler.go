@@ -83,7 +83,7 @@ func (a *API) clearSessionCookies(w http.ResponseWriter) {
 
 // GET /api/auth/config
 func (a *API) AuthConfig(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, map[string]bool{"adEnabled": a.Cfg.AD.Enabled})
+	httpx.JSON(w, http.StatusOK, map[string]bool{"adEnabled": a.Cfg.AD().Enabled})
 }
 
 // POST /api/auth/login
@@ -99,7 +99,7 @@ func (a *API) Login(w http.ResponseWriter, r *http.Request) {
 
 	mode := req.Mode
 	if mode != "local" {
-		if a.Cfg.AD.Enabled {
+		if a.Cfg.AD().Enabled {
 			mode = "ad"
 		} else {
 			mode = "local"

@@ -32,20 +32,24 @@ func escapeFilter(v string) string {
 //  2. Otherwise, attempt a direct bind as "<username>@<AD_DOMAIN>"
 //     (userPrincipalName), the simplest setup for a single domain.
 func AuthenticateAD(cfg *config.Config, username, password string) (*Profile, error) {
-	if !cfg.AD.Enabled {
+	// One snapshot per attempt: a settings change mid-login must not leave
+	// this function binding with one server and searching another.
+	ad := cfg.AD()
+
+	if !ad.Enabled {
 		return nil, fmt.Errorf("AD authentication is not enabled on this server")
 	}
 	if username == "" || password == "" {
 		return nil, fmt.Errorf("username and password are required")
 	}
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: !cfg.AD.TLSRejectUnauthorized} // nolint:gosec
+	tlsConfig := &tls.Config{InsecureSkipVerify: !ad.TLSRejectUnauthorized} // nolint:gosec
 
 	dial := func() (*ldap.Conn, error) {
-		if strings.HasPrefix(cfg.AD.URL, "ldaps://") {
-			return ldap.DialURL(cfg.AD.URL, ldap.DialWithTLSConfig(tlsConfig))
+		if strings.HasPrefix(ad.URL, "ldaps://") {
+			return ldap.DialURL(ad.URL, ldap.DialWithTLSConfig(tlsConfig))
 		}
-		return ldap.DialURL(cfg.AD.URL)
+		return ldap.DialURL(ad.URL)
 	}
 
 	conn, err := dial()
@@ -56,18 +60,18 @@ func AuthenticateAD(cfg *config.Config, username, password string) (*Profile, er
 
 	var profile *Profile
 
-	if cfg.AD.BindDN != "" && cfg.AD.BindPassword != "" {
-		if err := conn.Bind(cfg.AD.BindDN, cfg.AD.BindPassword); err != nil {
+	if ad.BindDN != "" && ad.BindPassword != "" {
+		if err := conn.Bind(ad.BindDN, ad.BindPassword); err != nil {
 			logger.Warn("AD service account bind failed: %v", err)
 			return nil, fmt.Errorf("invalid Active Directory credentials")
 		}
 
-		filter := fmt.Sprintf("(%s=%s)", cfg.AD.UsernameAttribute, escapeFilter(username))
+		filter := fmt.Sprintf("(%s=%s)", ad.UsernameAttribute, escapeFilter(username))
 		searchReq := ldap.NewSearchRequest(
-			cfg.AD.BaseDN,
+			ad.BaseDN,
 			ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 			filter,
-			[]string{"dn", "cn", "mail", "displayName", cfg.AD.UsernameAttribute},
+			[]string{"dn", "cn", "mail", "displayName", ad.UsernameAttribute},
 			nil,
 		)
 
@@ -79,7 +83,7 @@ func AuthenticateAD(cfg *config.Config, username, password string) (*Profile, er
 
 		email := entry.GetAttributeValue("mail")
 		if email == "" {
-			email = username + "@" + cfg.AD.Domain
+			email = username + "@" + ad.Domain
 		}
 		name := entry.GetAttributeValue("displayName")
 		if name == "" {
@@ -103,7 +107,7 @@ func AuthenticateAD(cfg *config.Config, username, password string) (*Profile, er
 	} else {
 		upn := username
 		if !strings.Contains(username, "@") {
-			upn = username + "@" + cfg.AD.Domain
+			upn = username + "@" + ad.Domain
 		}
 		if err := conn.Bind(upn, password); err != nil {
 			logger.Warn("AD authentication failed for %q: %v", username, err)

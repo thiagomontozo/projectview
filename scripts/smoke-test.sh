@@ -1064,6 +1064,79 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+section "System settings"
+# These decide who may sign in and where e-mail goes, so reading them is close
+# to being able to take the installation over. The whole group is admin-only,
+# reads included.
+check "member cannot read the settings" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/settings")"
+check "nor write them" "403"     "$(status_of -X PUT "$BASE/api/settings" -H "$MEMBER_AUTH" -H 'Content-Type: application/json'         -d '{"values":{"SMTP_HOST":"evil.example.com"}}')"
+check "nor download them" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/settings/env")"
+check "anonymous cannot read them" "401" "$(status_of "$BASE/api/settings")"
+
+settings="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings")"
+contains "settings list the managed keys" "$settings" '"SMTP_HOST"'
+contains "and say where each came from"   "$settings" '"overridden"'
+
+# A credential must never come back out. The screen shows only whether one is
+# set, and the encrypted value never leaves the database.
+if printf '%s' "$settings" | grep -o '"key":"SMTP_PASSWORD"[^}]*' | grep -q '"value"'; then
+    fail "secrets are never read back" "SMTP_PASSWORD came back with a value"
+else
+    pass "secrets are never read back"
+fi
+
+# The allow-list is the security boundary: anything outside it is refused by
+# name rather than silently dropped.
+check "the database URL cannot be rewritten" "400"     "$(status_of -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"values":{"DATABASE_URL":"postgres://attacker/db"}}')"
+check "nor the token signing secret" "400"     "$(status_of -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"values":{"JWT_SECRET":"hunter2"}}')"
+check "nor the bootstrap admin password" "400"     "$(status_of -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"values":{"BOOTSTRAP_ADMIN_PASSWORD":"hunter2"}}')"
+
+saved_settings="$("${CURL[@]}" -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'     -d '{"values":{"SMTP_HOST":"smoke.mail.example.com","ALERT_WARN_DAYS_BEFORE":"5","SMTP_PASSWORD":"s3cr3t"}}')"
+contains "an administrator can save settings" "$saved_settings" '"ok":true'
+contains "and they are applied at once"       "$saved_settings" '"applied":true'
+
+reread_settings="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings")"
+contains "the new value is in force" "$reread_settings" "smoke.mail.example.com"
+contains "and is marked as changed here" "$reread_settings" '"overridden":true'
+
+# A secret saved once must not be wiped by a later save that leaves the field
+# blank - the commonest way a settings screen breaks a live system.
+"${CURL[@]}" -o /dev/null -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'     -d '{"values":{"SMTP_HOST":"smoke.mail.example.com","SMTP_PASSWORD":""}}'
+still_set="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings")"
+if printf '%s' "$still_set" | grep -o '"key":"SMTP_PASSWORD"[^}]*' | grep -q '"isSet":true'; then
+    pass "an empty secret field keeps the stored one"
+else
+    fail "an empty secret field keeps the stored one" "the stored password was cleared"
+fi
+
+# The export carries the effective configuration, in .env shape.
+env_export="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings/env")"
+contains "the export is .env shaped" "$env_export" "SMTP_HOST=smoke.mail.example.com"
+
+# Clearing an override reverts to what the deployment configured, not to empty.
+cleared_settings="$("${CURL[@]}" -X PUT "$BASE/api/settings" -H "$AUTH" -H 'Content-Type: application/json'     -d '{"values":{},"clear":["SMTP_HOST","ALERT_WARN_DAYS_BEFORE","SMTP_PASSWORD"]}')"
+contains "an override can be cleared" "$cleared_settings" '"ok":true'
+after_clear="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings/env")"
+if printf '%s' "$after_clear" | grep -q "SMTP_HOST=smoke.mail.example.com"; then
+    fail "clearing reverts to the environment" "the override is still in force"
+else
+    pass "clearing reverts to the environment"
+fi
+
+# Testing an integration that is switched off would prove nothing.
+check "testing mail while it is off is refused" "400"     "$(status_of -X POST "$BASE/api/settings/test/smtp" -H "$AUTH" -H 'Content-Type: application/json' -d '{}')"
+check "testing the directory while it is off is refused" "400"     "$(status_of -X POST "$BASE/api/settings/test/ad" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"username":"x","password":"y"}')"
+check "member cannot run the tests" "403"     "$(status_of -X POST "$BASE/api/settings/test/smtp" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' -d '{}')"
+
+contains "settings changes are audited"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=settings.changed")" "settings.changed"
+# The keys, never the values: the trail is readable by every administrator.
+if "${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=settings.changed" | grep -q "s3cr3t"; then
+    fail "the trail records keys, not secrets" "a saved password appears in the audit log"
+else
+    pass "the trail records keys, not secrets"
+fi
+
+# ---------------------------------------------------------------------------
 section "Cleanup"
 check "smoke space deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/spaces/$new_space_id")"
 check "smoke member deactivated" "200" \

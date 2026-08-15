@@ -22,6 +22,7 @@ const DocsPage = lazy(() => import('./pages/DocsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 
 function RouteFallback() {
   const { t } = useTranslation();
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="goals" element={<GoalsPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin/settings" element={<AdminSettingsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -81,6 +81,26 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}
+      # --- Single sign-on (OpenID Connect) ---
+      # These are the starting values. An administrator can change them from
+      # the settings screen, which stores them in the database and applies
+      # them without a restart.
+      OIDC_ENABLED: ${OIDC_ENABLED:-false}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-https://localhost/api/auth/oidc/callback}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      OIDC_AUTO_PROVISION: ${OIDC_AUTO_PROVISION:-false}
+      # --- Retention (0 keeps everything) ---
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-0}
+      NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-0}
+      RETENTION_CRON: ${RETENTION_CRON:-30 3 * * *}
+      # --- Settings mirror ---
+      # Where the settings screen writes its .env-shaped copy. The database is
+      # authoritative and is what the application reads; this file exists for
+      # backup and review. Leave it empty to switch mirroring off.
+      SETTINGS_ENV_FILE: ${SETTINGS_ENV_FILE:-/config/app.env}
       # --- Misc ---
       # Traffic is same-origin behind the proxy, so this only matters for
       # external API clients. Narrow it to your domain when you have one.
@@ -88,6 +108,12 @@ services:
       PORT: 4000
       # Marks session cookies "secure"; safe because the proxy serves HTTPS.
       NODE_ENV: production
+    volumes:
+      # A directory rather than a single file: bind-mounting a file that does
+      # not exist yet makes Docker create a directory in its place, and a
+      # directory called .env in the project root stops compose from starting
+      # at all.
+      - ./config:/config
     depends_on:
       postgres:
         condition: service_healthy

@@ -48,6 +48,11 @@ type API struct {
 	Layouts       *repo.Dashboards
 	Tokens        *repo.ServiceTokens
 	Privacy       *repo.Privacy
+	Settings      *repo.Settings
+	// EnvMirror and Mailer are set by main: one needs a path from the
+	// environment, the other needs the config the settings screen mutates.
+	EnvMirror *services.EnvMirror
+	Mailer    *services.Mailer
 	// OIDC is nil unless single sign-on is configured.
 	OIDC *auth.OIDC
 	// Engine runs the automation rules. Set by main once the notifier exists,
@@ -87,5 +92,6 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Layouts:       repo.NewDashboards(store),
 		Tokens:        repo.NewServiceTokens(store),
 		Privacy:       repo.NewPrivacy(store),
+		Settings:      repo.NewSettings(store, cfg.JWT.Secret),
 	}
 }

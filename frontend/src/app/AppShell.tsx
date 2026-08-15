@@ -26,6 +26,7 @@ import {
   Puzzle,
   Search,
   Settings,
+  Shield,
   Sun,
   Target,
   Users
@@ -109,6 +110,21 @@ export function AppShell() {
         </div>
 
         <div className={styles.sidebarFooter}>
+          {/* Rendered only for administrators. The server refuses the routes
+              regardless; hiding the link keeps everyone else from finding a
+              screen they cannot use. */}
+          {user?.role === 'admin' && (
+            <NavLink
+              to="/admin/settings"
+              className={({ isActive }) => clsx(styles.navLink, isActive && styles.navLinkActive)}
+            >
+              <span className={styles.navIcon}>
+                <Shield size={17} />
+              </span>
+              {t('nav.adminSettings')}
+            </NavLink>
+          )}
+
           <NavLink
             to="/settings"
             className={({ isActive }) => clsx(styles.navLink, isActive && styles.navLinkActive)}

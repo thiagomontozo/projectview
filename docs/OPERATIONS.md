@@ -119,6 +119,35 @@ of a tidy database.
 
 ---
 
+## Changing settings without a redeploy
+
+**Administration → System settings**, administrators only.
+
+AD/LDAP, SMTP, single sign-on, the alert lead time and the retention windows
+can all be changed there. The override is stored in PostgreSQL and applied to
+the running process immediately: the next login uses the new directory, the
+next notification the new mail server. Nothing needs restarting.
+
+The screen also runs two live checks against the settings in force — a real
+test message, and a real bind against the directory with credentials that are
+used for the attempt and never stored.
+
+**Back up the mirror, or the database, or both.** Saving writes a
+`.env`-shaped copy to `SETTINGS_ENV_FILE` (`./config/app.env` by default). It
+carries the directory bind password and the mail account in the clear, exactly
+as `.env` does, so treat it the same way. The database is what the application
+reads; the file is for backup, review and rebuilding elsewhere.
+
+**Rotating `JWT_SECRET` makes stored secrets unreadable.** They are sealed with
+a key derived from it. A rotated secret leaves them undecryptable, and the
+application drops them with a warning in the log rather than passing gibberish
+to the directory. Re-enter them on the settings screen afterwards; everything
+else survives.
+
+The environment still matters. It supplies the starting values, it is what a
+fresh installation boots with, and clearing an override on the screen reverts
+that key to it.
+
 ## Single sign-on (OIDC)
 
 Works with any compliant provider — Entra ID, Okta, Keycloak, Google
@@ -134,6 +163,9 @@ OIDC_REDIRECT_URL=https://projectview.example.com/api/auth/oidc/callback
 OIDC_SCOPES="openid profile email"
 OIDC_AUTO_PROVISION=false
 ```
+
+These are the starting values; the same settings are editable from the
+settings screen once the stack is up, which is usually easier than a redeploy.
 
 Register `OIDC_REDIRECT_URL` with the provider exactly as written — a redirect
 URI mismatch is the single most common cause of a failed first setup.
