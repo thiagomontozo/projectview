@@ -10,6 +10,9 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
 **Stack:** **Go** backend, **React + TypeScript** frontend, PostgreSQL, behind an
 **nginx** edge proxy.
 
+Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
+[BACKLOG.md](BACKLOG.md).
+
 ## Features
 
 - **Active Directory login** — authentication against LDAP/AD

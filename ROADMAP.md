@@ -436,16 +436,20 @@ WebSocket hub and a lock for the schedulers, both named in the runbook.
 
 ## What is left
 
-Nothing in the roadmap. Outstanding items live across earlier phases and none
-of them block use:
+Nothing in the roadmap: all eight phases are delivered. The outstanding work is
+tracked in **[BACKLOG.md](BACKLOG.md)**, ordered by what blocks use rather than
+by size.
 
-- **M3's load test** — a 10k-task board at p95 < 100 ms, under k6.
-- **Attachments and recurring tasks** (A3). Attachments need object storage,
-  which is infrastructure rather than product.
-- **Signed webhooks and a public API** — they need retry, backoff and a delivery
-  log to be worth shipping, so they are a phase of their own rather than a
-  corner of another.
-- **Multi-replica support** — see the runbook.
+The three items at the top, in short:
+
+- **A user administration screen.** The API can already promote somebody to
+  administrator, create accounts and deactivate them — all authorised and
+  audited — but there is no page for it, so today it takes `curl`.
+- **Refusing to remove the last administrator.** An administrator can currently
+  demote or deactivate themselves with nothing to stop it, including when they
+  are the only one.
+- **Browser-level tests.** Every defect a user has actually hit was invisible to
+  the API tests and obvious in a rendered page.
 
 ---
 
