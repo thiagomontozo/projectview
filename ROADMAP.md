@@ -440,16 +440,13 @@ Nothing in the roadmap: all eight phases are delivered. The outstanding work is
 tracked in **[BACKLOG.md](BACKLOG.md)**, ordered by what blocks use rather than
 by size.
 
-The three items at the top, in short:
+Two of its Priority 1 items have since shipped — a user administration screen,
+and a refusal to demote or deactivate the last administrator. What is left at
+the top:
 
-- **A user administration screen.** The API can already promote somebody to
-  administrator, create accounts and deactivate them — all authorised and
-  audited — but there is no page for it, so today it takes `curl`.
-- **Refusing to remove the last administrator.** An administrator can currently
-  demote or deactivate themselves with nothing to stop it, including when they
-  are the only one.
 - **Browser-level tests.** Every defect a user has actually hit was invisible to
   the API tests and obvious in a rendered page.
+- **The load test behind M3**, the only milestone still open.
 
 ---
 
@@ -471,7 +468,7 @@ Every phase of the plan is done. Against the original estimate of ~30
 person-weeks, the eight phases landed as **9 verified deliveries**.
 
 What the system is now, measured rather than asserted: **6 embedded migrations**
-applied on boot, **9 Go test packages**, **247 end-to-end assertions** against a
+applied on boot, **9 Go test packages**, **284 end-to-end assertions** against a
 real containerised stack, and **5 CI jobs** gating every push.
 
 The honest remaining risk is **M3**: the load test has not been run. Everything

@@ -11,55 +11,44 @@ line somebody has to reverse-engineer later.
 
 ## Priority 1 — gaps that block ordinary use
 
-### 1.1 User administration screen
+### ✅ 1.1 User administration screen — done
 
-**The API can do this today. The interface cannot.**
+**Administration → Users.** Lists every account with its role, status and last
+sign-in; creates accounts, promotes and demotes, deactivates and reactivates,
+and resets passwords. Administrators only, with the server enforcing that on
+every route rather than trusting the hidden menu item.
 
-An administrator can already promote somebody to `admin`, deactivate an
-account, reset a password and create a user — all of it authorised, validated
-and written to the audit trail as `user.role_changed`, `user.deactivated` and
-`user.created`. Verified end to end against a running stack.
+Two properties worth knowing, both asserted in the smoke test:
 
-What is missing is a screen. There is no `/admin/users` route, nothing calls
-`PUT /api/users/:id` with a role, and nothing calls `POST /api/auth/register`.
-In practice an administrator has to use `curl` to add a colleague, which is not
-a feature anybody can be asked to use.
+- **A role change applies to the session the person already holds.**
+  Authorization reads the account on every request rather than trusting the
+  role baked into the token, so a promotion does not wait for the next sign-in
+  — and neither does a demotion, which is the half that matters.
+- **Resetting a password ends every session that account has open.**
 
-**Done means:** a page listing every account with its role, status and last
-sign-in; create, promote/demote, deactivate/reactivate, reset password and
-erase from it; visible only to administrators, with the server still enforcing
-that on every route.
+### ✅ 1.2 Refuse to remove the last administrator — done
 
-```bash
-# What works now, and what the screen should be doing for you:
-curl -X PUT https://<host>/api/users/<id> \
-     -H "Authorization: Bearer <admin token>" \
-     -H 'Content-Type: application/json' \
-     -d '{"role":"admin"}'
-```
+Demoting or deactivating the last active administrator is refused with `409`
+and a message saying to promote somebody else first. Enforced on the SCIM path
+too, where a directory sync would otherwise do it automatically at three in the
+morning. Anonymised accounts do not count towards the total: an erased
+tombstone cannot sign in, and counting it would let the last real administrator
+lock everybody out.
 
-### 1.2 Refuse to remove the last administrator
+The screen warns before the server has to, when only one administrator is left.
 
-Found while checking 1.1. `UpdateUser` lets any administrator set any role on
-any account — **including their own**. Nothing stops the only administrator
-demoting themselves, or deactivating their own account, and there is no
-recovery path short of an `UPDATE` statement against the database.
-
-Erasure already refuses to run against your own account. Role changes and
-deactivation do not.
-
-**Done means:** demoting or deactivating an account is refused when it would
-leave the installation with no active administrator, with a message that says
-so; a regression test proves it; the smoke test asserts it.
-
-Cheap to build, and the kind of thing that is only ever discovered at the worst
-possible moment.
+**A smaller defect surfaced while testing it.** A member sending a role on
+their own profile got `200` with the field silently dropped — no escalation,
+the role never changed, but the response claimed a change had been applied.
+It now refuses with `403`. Harmless to an attacker, who learns nothing either
+way; thoroughly misleading to anyone else, including an administrator editing
+their own profile.
 
 ### 1.3 Browser-level tests (Playwright)
 
 **The strongest evidence in this backlog is the recent history.**
 
-Three defects in a row reached a user despite five green CI jobs, 270 API
+Three defects in a row reached a user despite five green CI jobs, 284 API
 assertions and 45 frontend tests:
 
 | Defect | Why nothing caught it |
@@ -70,7 +59,9 @@ assertions and 45 frontend tests:
 
 All three are invisible to an API test and obvious in a rendered page. Each now
 has a targeted guard, but the guards were written *after* the fact — the
-pipeline still cannot see a screen.
+pipeline still cannot see a screen. The user administration screen that closed
+1.1 is covered the same way as everything before it: thoroughly at the API, not
+at all in a browser.
 
 **Done means:** a Playwright suite in CI covering sign-in, creating a project,
 moving a card, opening a task and changing its status, switching language, and
@@ -185,12 +176,16 @@ doing only if somebody asks by name.
 
 ## Recommendation
 
-**1.1, 1.2 and 1.3, in that order.** Roughly two weeks together.
+**1.3, then 2.1.** Roughly a week and a half together.
 
-The first two are a real hole an administrator hits on day one — there is no
-way to add a colleague from the interface, and one careless click can leave the
-installation with nobody able to administer it. The third closes the gap that
-has produced every defect a user has actually seen in this project.
+1.1 and 1.2 are done: an administrator can now manage accounts from the
+interface, and cannot accidentally leave the installation with nobody able to
+administer it.
+
+What remains at Priority 1 is the browser tests, and the case for them has
+only got stronger — the screen that closed 1.1 is itself covered only at the
+API. Every defect a user has actually seen in this project was invisible there
+and obvious in a rendered page.
 
 Everything below Priority 2 is a feature. Everything at Priority 1 is the
 difference between working software and software that works when tested.

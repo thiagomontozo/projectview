@@ -97,6 +97,11 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
 - **Privacy** — self-service data export, administrator-performed erasure that
   anonymises rather than deletes, and optional retention windows for the audit
   trail and read notifications.
+- **User administration** — an administrator can create accounts, **promote and
+  demote**, deactivate and reactivate, and reset passwords from the interface.
+  A role change applies to the session the person already holds, and the last
+  active administrator cannot be demoted or deactivated: the path back from
+  that is an `UPDATE` against the database.
 - **Settings screen for administrators** — AD/LDAP, SMTP, single sign-on,
   alert lead time and retention are editable in the application and take
   effect immediately, with no restart. Only administrators may read or change
@@ -496,7 +501,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-270 assertions covering the proxy (HTTPS redirect, security headers, the
+284 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
