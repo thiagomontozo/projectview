@@ -16,16 +16,18 @@ Phase A3 Product engine              ██████████████�
 Phase B1 UI foundation               ████████████████████  100%   ✅
 Phase B2 Views                       ████████████████░░░░   80%   ✅
 Phase B3 Collaboration               ████████████████░░░░   80%   ✅
-Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase C  Intelligence & enterprise   ████████████████░░░░   80%   ✅
                                      ─────────────────────
-                              overall  ~7 of 8 phases
+                              overall   8 of 8 phases
 ```
 
 Schedules have real dependencies and a critical path, tasks carry typed
 custom fields and tracked time, rules act on changes without anyone asking,
 and the conversation around the work — threads, reactions, mentions,
-documents, presence — happens in the product. What remains is the enterprise
-layer.
+documents, presence — happens in the product. Goals are fed by the tasks
+underneath them, the portfolio derives its own health, earned value measures
+against a frozen plan, and the enterprise plumbing an organisation needs to
+hold real people's data is in place.
 
 ---
 
@@ -341,12 +343,109 @@ one for a gain the Markdown editor already delivers.
 
 ---
 
+## ✅ Phase C — Intelligence and enterprise
+
+The phase that decides whether this can be deployed to an organisation rather
+than to a team.
+
+**Goals and OKRs.** An objective with key results, and a key result is either
+typed in or **read from the tasks of a project**. The derived kind is the point:
+a goal whose number nobody updates is worse than no goal at all. A derived
+measure refuses a hand-typed value, because the next read would overwrite it and
+accepting the write would be a lie about what was stored. Progress is measured
+from the starting value, not from zero — moving a number from 80 to 90 is at 0%
+on the day it is written, not at 89%.
+
+**Portfolio and capacity.** Every project at once, with health **derived**
+rather than typed: a RAG status somebody maintains by hand is green until the
+week it is red, which is the week it stopped being useful. The thresholds are
+deliberate — a tenth of the work overdue before a project turns amber, so one
+stale task cannot paint a healthy project red, and the worst signal wins so
+"late *and* over budget" does not read as merely at risk. Capacity compares
+committed hours against a real declared figure, with a task's estimate shared
+between its assignees, because a task with three people on it is not three times
+the work.
+
+**Baselines and earned value.** A baseline is the plan as approved, snapshotted:
+reading the plan out of the live rows would compare the schedule against itself
+and report perfection forever. Earned value uses the 0/100 rule — a task earns
+its budget when it is finished and nothing before — because self-reported
+percentages are the part of every EVM implementation that lies. Planned value
+accrues linearly between baselined start and due dates. Indices are **omitted
+rather than reported as zero** when their denominator is zero: a CPI of 0 reads
+as catastrophe when the truth is "no data yet". Measured in **hours**, not
+currency: the system holds estimates and tracked time but no rates.
+
+**Saved dashboards.** The card arrangement moved out of one browser's local
+storage and onto the server, so it follows a person between machines. A saved
+layout is reconciled with the cards the running build actually has, so an older
+arrangement never hides a card that shipped since.
+
+**Single sign-on.** OIDC with PKCE, written directly rather than pulled from a
+library — the flow is four HTTP calls, and the alternative brings its own
+session model and its own opinions about cookies, both of which this application
+already has. State and verifier travel in short-lived cookies rather than server
+memory, so the replica that answers the callback need not be the one that
+started the flow. Auto-provisioning is off by default. SAML was **deferred**: it
+is a second, much larger protocol, and every provider an internal tool is likely
+to meet speaks OIDC.
+
+**SCIM 2.0 provisioning.** Because provisioning by hand is where an internal
+tool leaks: a person leaves, HR closes their directory account, and the project
+tool keeps their session alive because nobody remembered it existed. A SCIM
+delete deactivates and **revokes every live session immediately** — flipping a
+flag and letting existing tokens run to expiry is the exact gap provisioning
+exists to close. Groups are not implemented, deliberately: team membership here
+is a project decision, and mapping it from the directory would let the directory
+quietly rearrange who can see what. Machine credentials are stored as hashes
+only.
+
+**Privacy and retention.** Self-service export; erasure that **anonymises rather
+than deletes**, because deleting the row would cascade through work that belongs
+to the organisation and punch holes in the audit trail. Retention windows are
+zero by default: deleting records because a config file was left empty is what a
+retention policy exists to prevent. Unread notifications are never expired.
+
+**Operations.** [docs/OPERATIONS.md](docs/OPERATIONS.md) covers backup, a
+restore procedure that says how to *verify* it worked, retention, SSO and SCIM
+setup, privacy requests, and exactly what would have to change before running a
+second replica — the WebSocket hub is per-process and the schedulers have no
+lock, and both are named rather than glossed over.
+
+**Verified:** the smoke test grew from 172 to **246 assertions**, including the
+full SCIM lifecycle against a real service token, an erasure that leaves a
+tombstone and an audit entry, and the negative cases (a member cannot read the
+portfolio, mint a token, capture a baseline or declare an organisation-wide
+goal). New unit tests cover the earned-value maths — the 0/100 rule, deleted
+tasks keeping their budget, indices absent rather than zero — the health
+thresholds, key-result progress including measures that count downwards, and the
+SCIM filter parser.
+
+**Three bugs the assertions caught:** adding two columns to the user query broke
+the workload report's scan; the privacy export queried `audit_log` by column
+names that do not exist; and the edge proxy routed `/scim` to the SPA, so every
+provisioning call reached the frontend instead of the API.
+
+**Deferred, with reason:** SAML, WAL-based point-in-time recovery (a different
+operational commitment, and one to take deliberately), XLSX and PDF export (a
+library and a rendering engine to solve what CSV and the browser's print dialog
+already solve), and multi-replica support — which needs a shared bus for the
+WebSocket hub and a lock for the schedulers, both named in the runbook.
+
+---
+
 ## What is left
 
-### ⬜ Phase C — Intelligence and enterprise
-Goals/OKRs · user-configurable dashboards · portfolio · capacity planning ·
-baselines and earned value · exports · SAML/OIDC SSO · SCIM · retention ·
-LGPD export and erasure · backup runbooks · HA.
+Nothing in the roadmap. Outstanding items live across earlier phases and none
+of them block use:
+
+- **M3's load test** — a 10k-task board at p95 < 100 ms, under k6.
+- **Attachments and recurring tasks** (A3). Attachments need object storage,
+  which is infrastructure rather than product.
+- **Signed webhooks and a public API** — they need retry, backoff and a delivery
+  log to be worth shipping, so they are a phase of their own rather than a
+  corner of another.
+- **Multi-replica support** — see the runbook.
 
 ---
 
@@ -360,20 +459,18 @@ LGPD export and erasure · backup runbooks · HA.
 | M3 | A 10k-task board renders under 100 ms p95 under load | ⬜ |
 | M4 | Gantt reorders dependencies and recomputes the critical path | ✅ |
 | M5 | "Task overdue → notify assignee and change status" runs end to end | ✅ |
+| M6 | Deactivating in the directory revokes the session here immediately | ✅ |
 
 ## Effort
 
-Phases 0, A1, A2, A3, B1, B2 and B3 are done. Phase C is roughly **4
-person-weeks**.
+Every phase of the plan is done. Against the original estimate of ~30
+person-weeks, the eight phases landed as **9 verified deliveries**.
 
-**Phase C is now the only phase left, and it is the one that decides whether
-this can be deployed to an organisation rather than to a team.** SSO, SCIM
-provisioning and LGPD export/erasure are not features anyone asks for by name;
-they are the conditions under which an internal tool is allowed to hold real
-people's data. Goals/OKRs and portfolio reporting are the visible half.
+What the system is now, measured rather than asserted: **6 embedded migrations**
+applied on boot, **9 Go test packages**, **246 end-to-end assertions** against a
+real containerised stack, and **5 CI jobs** gating every push.
 
-Also outstanding across earlier phases, none of it blocking: the load test
-behind **M3** (a 10k-task board at p95 < 100 ms), attachments and recurring
-tasks from A3, and signed webhooks — which need retry, backoff and a delivery
-log to be worth shipping, so they are a phase of their own rather than a corner
-of another.
+The honest remaining risk is **M3**: the load test has not been run. Everything
+else is either shipped or named above with a reason. The product works; what has
+not been proven is how it behaves at ten thousand tasks under concurrent load,
+and that is the next thing worth doing.

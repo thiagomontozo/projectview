@@ -16,6 +16,7 @@ import (
 	"projectview/internal/handlers"
 	"projectview/internal/models"
 	"projectview/internal/obs"
+	"projectview/internal/repo"
 	"projectview/internal/ws"
 )
 
@@ -59,6 +60,25 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		// Account creation mints accounts and assigns roles, so it is an
 		// administrative action - never an anonymous one.
 		r.With(requireAuth, auth.RequireRole(models.RoleAdmin)).Post("/register", api.Register)
+
+		// Single sign-on. The whole flow is anonymous by definition: it is how
+		// somebody who has no session yet obtains one.
+		r.Get("/oidc/config", api.OIDCConfig)
+		r.Get("/oidc/start", api.OIDCStart)
+		r.Get("/oidc/callback", api.OIDCCallback)
+	})
+
+	// SCIM 2.0 provisioning. Authenticated by a service token, never by a user
+	// session: a provisioning client is not a person and must not be able to
+	// act as one.
+	r.Route("/scim/v2", func(r chi.Router) {
+		r.Use(api.RequireServiceToken(repo.ScopeSCIM))
+		r.Get("/Users", api.SCIMListUsers)
+		r.Post("/Users", api.SCIMCreateUser)
+		r.Get("/Users/{id}", api.SCIMGetUser)
+		r.Put("/Users/{id}", api.SCIMReplaceUser)
+		r.Patch("/Users/{id}", api.SCIMPatchUser)
+		r.Delete("/Users/{id}", api.SCIMDeleteUser)
 	})
 
 	r.Route("/api/spaces", func(r chi.Router) {
@@ -91,6 +111,41 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Get("/{id}", api.GetUser)
 		r.Put("/{id}", api.UpdateUser)
 		r.Post("/{id}/password", api.ChangePassword)
+
+		// The two privacy rights. Export is self-service; erasure is not.
+		r.Get("/{id}/data-export", api.ExportPersonalData)
+		r.With(auth.RequireRole(models.RoleAdmin)).Post("/{id}/erase", api.ErasePersonalData)
+	})
+
+	r.Route("/api/goals", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/", api.ListGoals)
+		r.Post("/", api.CreateGoal)
+		r.Get("/{id}", api.GetGoal)
+		r.Put("/{id}", api.UpdateGoal)
+		r.Delete("/{id}", api.DeleteGoal)
+		r.Post("/{id}/key-results", api.AddKeyResult)
+		r.Put("/{id}/key-results/{keyResultId}", api.SetKeyResultValue)
+		r.Delete("/{id}/key-results/{keyResultId}", api.DeleteKeyResult)
+	})
+
+	r.Route("/api/portfolio", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/", api.PortfolioSummary)
+		r.Get("/export.csv", api.ExportPortfolio)
+		r.Get("/capacity", api.CapacityReport)
+		r.Get("/capacity/export.csv", api.ExportCapacity)
+	})
+
+	r.With(requireAuth).Delete("/api/baselines/{id}", api.DeleteBaseline)
+
+	// Machine credentials are administrative: a token is a way in that outlives
+	// whoever created it.
+	r.Route("/api/service-tokens", func(r chi.Router) {
+		r.Use(requireAuth, auth.RequireRole(models.RoleAdmin))
+		r.Get("/", api.ListServiceTokens)
+		r.Post("/", api.CreateServiceToken)
+		r.Delete("/{id}", api.RevokeServiceToken)
 	})
 
 	r.Route("/api/teams", func(r chi.Router) {
@@ -120,6 +175,13 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Post("/{projectId}/fields", api.CreateCustomField)
 		r.Get("/{projectId}/automations", api.ListAutomations)
 		r.Post("/{projectId}/automations", api.CreateAutomation)
+
+		// Baselines and earned value. The route parameter is {id} here rather
+		// than {projectId} because these handlers load the project directly.
+		r.Get("/{id}/baselines", api.ListBaselines)
+		r.Post("/{id}/baselines", api.CaptureBaseline)
+		r.Get("/{id}/earned-value", api.EarnedValue)
+		r.Get("/{id}/export.csv", api.ExportProjectTasks)
 	})
 
 	r.Route("/api/fields", func(r chi.Router) {
@@ -194,6 +256,12 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Get("/workload-chart", api.WorkloadChart)
 		r.Get("/project-progress", api.ProjectProgress)
 		r.Get("/completion-trend", api.CompletionTrend)
+
+		// The card arrangement, saved per person so it follows them between
+		// machines instead of living in one browser's local storage.
+		r.Get("/layout", api.GetDashboardLayout)
+		r.Put("/layout", api.SaveDashboardLayout)
+		r.Delete("/layout", api.ResetDashboardLayout)
 	})
 
 	r.Route("/api/notifications", func(r chi.Router) {

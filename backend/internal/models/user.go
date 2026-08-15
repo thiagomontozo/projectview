@@ -25,13 +25,21 @@ type User struct {
 	Active        bool        `json:"active"`
 	NotifyByEmail bool        `json:"notifyByEmail"`
 	LastLoginAt   *time.Time  `json:"lastLoginAt,omitempty"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
+	// WeeklyCapacity is the hours a week this person is available for, which
+	// capacity planning compares committed work against.
+	WeeklyCapacity float64 `json:"weeklyCapacityHours"`
+	// ExternalID is the identity provider's stable subject. Never shown: it
+	// identifies the account to a system, not to a person.
+	ExternalID *string   `json:"-"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 const (
 	AuthSourceLocal = "local"
 	AuthSourceAD    = "ad"
+	AuthSourceOIDC  = "oidc"
+	AuthSourceSCIM  = "scim"
 
 	RoleAdmin   = "admin"
 	RoleManager = "manager"

@@ -95,12 +95,21 @@ export const keys = {
   workloadChart: ['dashboard', 'workload-chart'] as const,
   projectProgress: ['dashboard', 'project-progress'] as const,
   completionTrend: ['dashboard', 'completion-trend'] as const,
-  audit: (filters: string) => ['audit', filters] as const
+  audit: (filters: string) => ['audit', filters] as const,
+  goals: (spaceId: string) => ['goals', spaceId] as const,
+  goal: (id: string) => ['goals', 'detail', id] as const,
+  portfolio: (spaceId: string) => ['portfolio', spaceId] as const,
+  capacity: (window: string) => ['portfolio', 'capacity', window] as const,
+  baselines: (projectId: string) => ['projects', projectId, 'baselines'] as const,
+  earnedValue: (projectId: string) => ['projects', projectId, 'earned-value'] as const,
+  dashboardLayout: ['dashboard', 'layout'] as const,
+  serviceTokens: ['service-tokens'] as const,
+  ssoConfig: ['auth', 'oidc-config'] as const
 };
 
 /* --- Fetchers ---------------------------------------------------------------- */
 
-const get = async <T>(url: string, params?: Record<string, unknown>): Promise<T> => {
+export const get = async <T>(url: string, params?: Record<string, unknown>): Promise<T> => {
   const { data } = await api.get<T>(url, { params });
   return data;
 };

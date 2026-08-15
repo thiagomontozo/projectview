@@ -570,3 +570,191 @@
     grid-column: span 1;
   }
 }
+
+/* --- Goals ---------------------------------------------------------------------- */
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.goalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.goalName {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  margin: 0;
+}
+
+.goalProgress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.goalProgressBar,
+.miniBar {
+  flex: 1;
+  height: 8px;
+  min-width: 60px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.goalProgressBar > span,
+.miniBar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+/* Past capacity the bar is full, so the colour is what carries the overrun. */
+.miniBarOver {
+  background: var(--danger) !important;
+}
+
+.overloaded {
+  color: var(--danger);
+  font-weight: var(--weight-semibold);
+}
+
+.goalPercent {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+
+.keyResultList {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.keyResultRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+}
+
+.keyResultRow:last-child {
+  border-bottom: none;
+}
+
+.keyResultName {
+  min-width: 0;
+}
+
+.keyResultNumbers {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.keyResultInput {
+  width: 84px;
+}
+
+.goalActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+/* --- Portfolio ------------------------------------------------------------------ */
+.portfolioLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: inherit;
+  text-decoration: none;
+  font-weight: var(--weight-medium);
+}
+
+.portfolioLink:hover {
+  color: var(--accent-text);
+}
+
+.projectDot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.evmGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.evmFigure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.evmValue {
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.evmGood {
+  color: var(--success);
+}
+
+.evmBad {
+  color: var(--danger);
+}
+
+/* --- Service tokens ------------------------------------------------------------- */
+.tokenReveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: var(--warning-subtle, var(--surface-sunken));
+}
+
+.tokenSecret {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  word-break: break-all;
+  user-select: all;
+}
+
+@media (max-width: 640px) {
+  .fieldRow {
+    grid-template-columns: 1fr;
+  }
+}

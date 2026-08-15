@@ -74,6 +74,26 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
 - **HTTPS by default** — an nginx edge proxy terminates TLS, applies the
   security headers and rate limits, and is the only container published to the
   host.
+- **Goals and OKRs** — objectives with key results that are either typed in or
+  **read from the tasks themselves**, so a goal cannot drift from the work
+  underneath it.
+- **Portfolio** — every project at once with a **derived** health rating (a RAG
+  status somebody updates by hand is green until the week it is red), plus
+  **capacity planning**: committed hours against the hours each person actually
+  has, with a task's estimate shared between its assignees.
+- **Baselines and earned value** — freeze the approved plan and measure against
+  it: PV, EV, AC, SPI, CPI, EAC and VAC, in **hours**. The system holds
+  estimates and tracked time but no rates, and inventing one would produce a
+  number that looks authoritative and is not.
+- **CSV exports** for the task list, the portfolio and the capacity report.
+- **Saved dashboards** — the card arrangement is stored per person on the
+  server, so it follows them between machines.
+- **Single sign-on (OIDC)** alongside AD and local accounts, and **SCIM 2.0
+  provisioning** so deactivating someone in the directory revokes their
+  sessions here immediately.
+- **Privacy** — self-service data export, administrator-performed erasure that
+  anonymises rather than deletes, and optional retention windows for the audit
+  trail and read notifications.
 - **Fully containerized** with Docker Compose (proxy, frontend, backend,
   PostgreSQL).
 
@@ -356,6 +376,24 @@ On the first successful AD login a matching local user is created
 automatically (just-in-time provisioning) with the default `member` role. An
 administrator can promote them to `admin`/`manager` afterwards.
 
+## Single sign-on, provisioning and privacy
+
+Setup, backup/restore and the two privacy rights are covered in
+[docs/OPERATIONS.md](docs/OPERATIONS.md). In brief:
+
+- **OIDC single sign-on** works with any compliant provider; endpoints are
+  discovered from the issuer. Auto-provisioning is **off** by default — with it
+  on, anyone the identity provider will authenticate has an account here, which
+  is a wider door than most organisations intend. Keep at least one local
+  administrator: an installation whose only way in is an external provider is
+  unreachable during that provider's outage.
+- **SCIM 2.0** at `/scim/v2/Users`, authenticated by a service token rather
+  than a user session. A SCIM delete **deactivates and revokes every live
+  session immediately** — it never removes the row, because the person's tasks,
+  comments and time entries belong to the organisation.
+- **Data export** is self-service; **erasure** is an administrator's action,
+  requires the username as confirmation, and anonymises rather than deletes.
+
 ## Main environment variables
 
 See [.env.example](.env.example) for the full, commented list. Summary:
@@ -369,6 +407,8 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 | `SMTP_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Internal e-mail |
 | `ALERT_CRON`, `ALERT_WARN_DAYS_BEFORE` | Deadline alert frequency and lead time |
 | `BOOTSTRAP_ADMIN_*` | Admin account seeded on first run |
+| `OIDC_ENABLED`, `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_AUTO_PROVISION` | Single sign-on |
+| `AUDIT_RETENTION_DAYS`, `NOTIFICATION_RETENTION_DAYS`, `RETENTION_CRON` | Retention; both windows default to 0, which keeps everything |
 | `TLS_COMMON_NAME`, `PROXY_HTTP_PORT`, `PROXY_HTTPS_PORT` | Edge proxy and TLS |
 
 ## Local development (without Docker)
@@ -416,7 +456,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-172 assertions covering the proxy (HTTPS redirect, security headers, the
+246 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
@@ -508,6 +548,17 @@ the tool is safe to re-run.
   and channel, quiet hours, and digest cadence.
 - **Notification** — in-app notifications (assignments, deadlines, comments),
   delivered in real time over WebSocket.
+- **Goal / KeyResult** — an objective and the measures against it. A measure is
+  manual or derived from a project's tasks; a derived one refuses a hand-typed
+  value, because the next read would overwrite it.
+- **ProjectBaseline** — the plan as approved, snapshotted as JSONB. Earned
+  value compares today against it; reading the plan from the live rows would
+  compare the schedule against itself and report perfection forever.
+- **Dashboard** — one saved card layout per person, with a partial unique index
+  enforcing a single default.
+- **ServiceToken** — machine credentials for SCIM and reporting. Only the hash
+  is stored: a token the database can hand back is a token every database
+  administrator has silently been issued.
 
 ## Security notes / suggested next steps
 

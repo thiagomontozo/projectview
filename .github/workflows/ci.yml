@@ -155,6 +155,7 @@ jobs:
                    task_watchers automations automation_runs \
                    chat_reactions chat_mentions docs doc_revisions \
                    notification_preferences \
+                   goals key_results dashboards project_baselines service_tokens \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
@@ -175,10 +176,30 @@ jobs:
 
           # Every migration must be recorded, so a restart does not re-run one.
           for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy \
-                   0004_product_engine 0005_collaboration; do
+                   0004_product_engine 0005_collaboration 0006_enterprise; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done
+
+          # One default dashboard per person, enforced rather than assumed: two
+          # defaults means the app picks arbitrarily and the layout appears to
+          # change on its own.
+          psql "SELECT indexname FROM pg_indexes WHERE indexname = 'dashboards_one_default_idx'" | grep -q . \
+            || { echo "single-default-dashboard index is missing" >&2; exit 1; }
+
+          # A machine credential must never be readable from the database.
+          hashed="$(psql "SELECT count(*) FROM information_schema.columns
+                           WHERE table_name='service_tokens' AND column_name='token_hash'")"
+          [ "$hashed" = "1" ] || { echo "service tokens must be stored hashed" >&2; exit 1; }
+          plaintext="$(psql "SELECT count(*) FROM information_schema.columns
+                              WHERE table_name='service_tokens' AND column_name IN ('token','secret')")"
+          [ "$plaintext" = "0" ] || { echo "service_tokens stores a plaintext secret" >&2; exit 1; }
+
+          # Erasure needs somewhere to record that it happened, or a second
+          # request would rename the tombstone again.
+          psql "SELECT count(*) FROM information_schema.columns
+                 WHERE table_name='users' AND column_name='anonymized_at'" | grep -qx 1 \
+            || { echo "users.anonymized_at is missing" >&2; exit 1; }
 
           # Full-text search depends on the generated column and its GIN index.
           psql "SELECT indexname FROM pg_indexes WHERE tablename='tasks'" | grep -q 'tasks_search_idx' \

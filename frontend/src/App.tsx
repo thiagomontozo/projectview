@@ -19,6 +19,8 @@ const ResourcesPage = lazy(() => import('./pages/ResourcesPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
+const GoalsPage = lazy(() => import('./pages/GoalsPage'));
+const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 function RouteFallback() {
@@ -74,6 +76,8 @@ export default function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="docs" element={<DocsPage />} />
+          <Route path="goals" element={<GoalsPage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Route>

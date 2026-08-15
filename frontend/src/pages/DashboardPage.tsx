@@ -13,6 +13,7 @@ import StatusPie from '../components/charts/StatusPie';
 import ProjectProgress from '../components/charts/ProjectProgress';
 import WorkloadBar from '../components/charts/WorkloadBar';
 import CompletionTrend from '../components/charts/CompletionTrend';
+import { useDashboardLayout, useSaveDashboardLayout, type DashboardWidget } from '../lib/enterprise';
 import {
   useCompletionTrend,
   useOverview,
@@ -21,8 +22,6 @@ import {
   useWorkloadChart
 } from '../lib/queries';
 import styles from './pages.module.css';
-
-const LAYOUT_KEY = 'pv_dashboard_layout';
 
 const WIDGET_IDS = [
   'kpi-active-projects',
@@ -38,19 +37,20 @@ const WIDGET_IDS = [
 
 type WidgetId = (typeof WIDGET_IDS)[number];
 
-function loadLayout(): WidgetId[] {
+/**
+ * Reconciles a saved arrangement with the cards this build actually has.
+ *
+ * Ids that no longer exist are dropped and newly added cards are appended, so
+ * an arrangement saved by an older build never hides a card that shipped since
+ * - and a card removed from the product does not leave a hole.
+ */
+function reconcileLayout(saved: DashboardWidget[] | null | undefined): WidgetId[] {
   const fallback = [...WIDGET_IDS];
-  try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
-    if (!raw) return fallback;
-    const saved = JSON.parse(raw) as string[];
-    // Keep only ids we still know about, then append any newly added widget,
-    // so an older saved layout never hides a card.
-    const known = saved.filter((id): id is WidgetId => (WIDGET_IDS as readonly string[]).includes(id));
-    return [...known, ...fallback.filter((id) => !known.includes(id))];
-  } catch {
-    return fallback;
-  }
+  if (!saved || saved.length === 0) return fallback;
+  const known = saved
+    .map((widget) => widget.id)
+    .filter((id): id is WidgetId => (WIDGET_IDS as readonly string[]).includes(id));
+  return [...known, ...fallback.filter((id) => !known.includes(id))];
 }
 
 function SortableWidget({
@@ -102,7 +102,12 @@ function Kpi({ label, value, tone }: { label: string; value: number | undefined;
 
 export default function DashboardPage() {
   const { t } = useTranslation();
-  const [layout, setLayout] = useState<WidgetId[]>(loadLayout);
+  // The arrangement is stored per person on the server, so it follows them to
+  // another machine instead of living in one browser's local storage.
+  const savedLayout = useDashboardLayout();
+  const saveLayout = useSaveDashboardLayout();
+  const [layout, setLayout] = useState<WidgetId[]>(() => [...WIDGET_IDS]);
+  const [loaded, setLoaded] = useState(false);
 
   const overview = useOverview();
   const statusBreakdown = useStatusBreakdown();
@@ -112,13 +117,13 @@ export default function DashboardPage() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
+  // Applied once. A later refetch must not reorder the cards under someone
+  // who is in the middle of dragging them.
   useEffect(() => {
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
-    } catch {
-      /* storage unavailable; the layout lasts for this session */
-    }
-  }, [layout]);
+    if (loaded || savedLayout.isLoading) return;
+    setLayout(reconcileLayout(savedLayout.data?.layout));
+    setLoaded(true);
+  }, [loaded, savedLayout.isLoading, savedLayout.data]);
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -127,7 +132,11 @@ export default function DashboardPage() {
       const from = current.indexOf(active.id as WidgetId);
       const to = current.indexOf(over.id as WidgetId);
       if (from === -1 || to === -1) return current;
-      return arrayMove(current, from, to);
+      const next = arrayMove(current, from, to);
+      // Saved on drop rather than on every state change: one write per
+      // deliberate rearrangement, not one per render.
+      saveLayout.mutate(next.map((id) => ({ id })));
+      return next;
     });
   }
 

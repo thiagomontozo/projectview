@@ -12,6 +12,7 @@ import { Button } from '../ui/Button';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tooltip } from '../ui/Menu';
 import {
   Bell,
+  Briefcase,
   Chart,
   Chat,
   CheckSquare,
@@ -26,6 +27,7 @@ import {
   Search,
   Settings,
   Sun,
+  Target,
   Users
 } from '../ui/icons';
 import { useTheme, type ThemePreference } from '../lib/theme';
@@ -47,6 +49,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/teams', labelKey: 'nav.teams', Icon: Users },
   { to: '/resources', labelKey: 'nav.resources', Icon: Puzzle },
   { to: '/reports', labelKey: 'nav.reports', Icon: Chart },
+  { to: '/goals', labelKey: 'nav.goals', Icon: Target },
+  { to: '/portfolio', labelKey: 'nav.portfolio', Icon: Briefcase },
   { to: '/chat', labelKey: 'nav.chat', Icon: Chat },
   { to: '/docs', labelKey: 'nav.docs', Icon: FileText }
 ];

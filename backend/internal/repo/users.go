@@ -38,13 +38,14 @@ func NewUsers(store *db.Store) *Users { return &Users{store: store} }
 const userColumns = `
 	u.id, u.username, u.name, u.email, u.password_hash, u.auth_source, u.role,
 	u.title, u.avatar_color, u.active, u.notify_by_email, u.last_login_at,
-	u.created_at, u.updated_at`
+	u.created_at, u.updated_at, u.weekly_capacity_hours, u.external_id`
 
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
 	err := row.Scan(&u.ID, &u.Username, &u.Name, &u.Email, &u.PasswordHash,
 		&u.AuthSource, &u.Role, &u.Title, &u.AvatarColor, &u.Active,
-		&u.NotifyByEmail, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		&u.NotifyByEmail, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+		&u.WeeklyCapacity, &u.ExternalID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -79,6 +80,39 @@ func (r *Users) ByLogin(ctx context.Context, login string) (*models.User, error)
 		return nil, err
 	}
 	return r.withTeams(ctx, u)
+}
+
+// ByExternalID resolves an account by the identity provider's subject. This,
+// not the username, is what an account is linked by: a provider may rename a
+// person, and the subject is the only thing that survives it.
+func (r *Users) ByExternalID(ctx context.Context, externalID string) (*models.User, error) {
+	return scanUser(r.store.Pool.QueryRow(ctx,
+		`SELECT `+userColumns+` FROM users u WHERE u.external_id = $1`, externalID))
+}
+
+// ListAll includes deactivated accounts, which provisioning needs to see:
+// a directory that cannot see a disabled user will try to create them again.
+func (r *Users) ListAll(ctx context.Context, limit, offset int) ([]models.User, int, error) {
+	var total int
+	if err := r.store.Pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.store.Pool.Query(ctx,
+		`SELECT `+userColumns+` FROM users u ORDER BY u.created_at LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := []models.User{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, *u)
+	}
+	return out, total, rows.Err()
 }
 
 func (r *Users) ByEmail(ctx context.Context, email string) (*models.User, error) {
@@ -160,11 +194,11 @@ func (r *Users) Create(ctx context.Context, u *models.User) error {
 	_, err := r.store.Pool.Exec(ctx, `
 		INSERT INTO users (id, username, name, email, password_hash, auth_source,
 		                   role, title, avatar_color, active, notify_by_email,
-		                   last_login_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		                   last_login_at, created_at, updated_at, external_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		u.ID, u.Username, u.Name, u.Email, u.PasswordHash, u.AuthSource, u.Role,
 		u.Title, u.AvatarColor, u.Active, u.NotifyByEmail, u.LastLoginAt,
-		u.CreatedAt, u.UpdatedAt)
+		u.CreatedAt, u.UpdatedAt, u.ExternalID)
 	return err
 }
 
@@ -173,11 +207,17 @@ func (r *Users) Create(ctx context.Context, u *models.User) error {
 // request body's shape.
 type UserPatch struct {
 	Name          *string
+	Email         *string
+	Username      *string
 	Title         *string
 	AvatarColor   *string
 	NotifyByEmail *bool
 	Role          *string
 	Active        *bool
+	// WeeklyCapacity is what capacity planning compares allocation against.
+	WeeklyCapacity *float64
+	// ExternalID links the account to the identity provider's stable subject.
+	ExternalID *string
 }
 
 func (r *Users) Update(ctx context.Context, id uuid.UUID, p UserPatch) error {
@@ -204,6 +244,18 @@ func (r *Users) Update(ctx context.Context, id uuid.UUID, p UserPatch) error {
 	}
 	if p.Active != nil {
 		add("active", *p.Active)
+	}
+	if p.Email != nil {
+		add("email", *p.Email)
+	}
+	if p.Username != nil {
+		add("username", *p.Username)
+	}
+	if p.WeeklyCapacity != nil {
+		add("weekly_capacity_hours", *p.WeeklyCapacity)
+	}
+	if p.ExternalID != nil {
+		add("external_id", *p.ExternalID)
 	}
 
 	tag, err := r.store.Pool.Exec(ctx,
@@ -314,6 +366,7 @@ func (r *Users) Workload(ctx context.Context) ([]WorkloadRow, error) {
 		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Email, &u.PasswordHash,
 			&u.AuthSource, &u.Role, &u.Title, &u.AvatarColor, &u.Active,
 			&u.NotifyByEmail, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
+			&u.WeeklyCapacity, &u.ExternalID,
 			&row.OpenTasks, &row.EstimateHours, &row.Overdue, &row.ProjectCount); err != nil {
 			return nil, err
 		}

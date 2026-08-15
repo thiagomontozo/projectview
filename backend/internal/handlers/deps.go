@@ -8,6 +8,7 @@ package handlers
 
 import (
 	"projectview/internal/audit"
+	"projectview/internal/auth"
 	"projectview/internal/config"
 	"projectview/internal/db"
 	"projectview/internal/obs"
@@ -41,6 +42,14 @@ type API struct {
 	Automations   *repo.Automations
 	Docs          *repo.Docs
 	Preferences   *repo.Preferences
+	Goals         *repo.Goals
+	Portfolio     *repo.Portfolio
+	Baselines     *repo.Baselines
+	Layouts       *repo.Dashboards
+	Tokens        *repo.ServiceTokens
+	Privacy       *repo.Privacy
+	// OIDC is nil unless single sign-on is configured.
+	OIDC *auth.OIDC
 	// Engine runs the automation rules. Set by main once the notifier exists,
 	// since the two depend on each other's construction order.
 	Engine *services.AutomationEngine
@@ -72,5 +81,11 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Automations:   repo.NewAutomations(store),
 		Docs:          repo.NewDocs(store),
 		Preferences:   repo.NewPreferences(store),
+		Goals:         repo.NewGoals(store),
+		Portfolio:     repo.NewPortfolio(store),
+		Baselines:     repo.NewBaselines(store),
+		Layouts:       repo.NewDashboards(store),
+		Tokens:        repo.NewServiceTokens(store),
+		Privacy:       repo.NewPrivacy(store),
 	}
 }

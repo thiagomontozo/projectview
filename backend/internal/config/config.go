@@ -65,6 +65,31 @@ type LogConfig struct {
 	Level  string // debug | info | warn | error
 }
 
+// OIDCConfig configures single sign-on against any OpenID Connect provider.
+// Endpoints are discovered from the issuer rather than configured one by one,
+// so a provider that moves them does not require a redeploy.
+type OIDCConfig struct {
+	Enabled      bool
+	IssuerURL    string
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
+	Scopes       string
+	// AutoProvision creates an account on first successful sign-in. Off by
+	// default: with it on, anyone the identity provider will authenticate has
+	// an account here, which is a wider door than most organisations intend.
+	AutoProvision bool
+}
+
+// RetentionConfig bounds how long two tables nobody prunes by hand are kept.
+// Zero disables a sweep entirely - the honest default, since deleting records
+// is not something to start doing because a config file was left empty.
+type RetentionConfig struct {
+	CronExpr         string
+	AuditDays        int
+	NotificationDays int
+}
+
 type Config struct {
 	NodeEnv    string
 	Port       string
@@ -75,6 +100,8 @@ type Config struct {
 	SMTP       SMTPConfig
 	Alerts     AlertsConfig
 	Bootstrap  BootstrapConfig
+	OIDC       OIDCConfig
+	Retention  RetentionConfig
 	CORSOrigin string
 }
 
@@ -166,6 +193,22 @@ func Load() *Config {
 			AdminEmail:    getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com"),
 			AdminName:     getenv("BOOTSTRAP_ADMIN_NAME", "Administrator"),
 			AdminPassword: getenv("BOOTSTRAP_ADMIN_PASSWORD", "ChangeMe123!"),
+		},
+
+		OIDC: OIDCConfig{
+			Enabled:       getbool("OIDC_ENABLED", false),
+			IssuerURL:     getenv("OIDC_ISSUER_URL", ""),
+			ClientID:      getenv("OIDC_CLIENT_ID", ""),
+			ClientSecret:  getenv("OIDC_CLIENT_SECRET", ""),
+			RedirectURL:   getenv("OIDC_REDIRECT_URL", "https://localhost/api/auth/oidc/callback"),
+			Scopes:        getenv("OIDC_SCOPES", "openid profile email"),
+			AutoProvision: getbool("OIDC_AUTO_PROVISION", false),
+		},
+
+		Retention: RetentionConfig{
+			CronExpr:         getenv("RETENTION_CRON", "30 3 * * *"),
+			AuditDays:        getint("AUDIT_RETENTION_DAYS", 0),
+			NotificationDays: getint("NOTIFICATION_RETENTION_DAYS", 0),
 		},
 
 		CORSOrigin: getenv("CORS_ORIGIN", "*"),

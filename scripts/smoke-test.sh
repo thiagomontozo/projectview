@@ -732,6 +732,280 @@ check "an unknown digest cadence is rejected" "400" \
         -H 'Content-Type: application/json' -d '{"digest":"hourly"}')"
 
 # ---------------------------------------------------------------------------
+section "Goals and OKRs"
+goal="$("${CURL[@]}" -X POST "$BASE/api/goals" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Smoke goal $$\",\"description\":\"created by the smoke test\"}")"
+goal_id="$(json_str "$goal" id)"
+if [ -n "$goal_id" ]; then
+    pass "goal created"
+else
+    fail "goal created" "$goal"
+fi
+contains "a new goal starts active" "$goal" '"status":"active"'
+
+# A manual measure: somebody types the number in.
+with_manual="$("${CURL[@]}" -X POST "$BASE/api/goals/$goal_id/key-results" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Manual measure","source":"manual","startValue":0,"targetValue":10}')"
+contains "a manual measure is added" "$with_manual" "Manual measure"
+contains "an untouched measure is at zero" "$with_manual" '"progress":0'
+
+manual_kr_id="$(printf '%s' "$with_manual" | grep -o '"keyResults":\[{"id":"[^"]*"' | sed 's/.*"id":"//;s/"$//')"
+halfway="$("${CURL[@]}" -X PUT "$BASE/api/goals/$goal_id/key-results/$manual_kr_id" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"value":5}')"
+contains "a manual reading is recorded" "$halfway" '"currentValue":5'
+contains "progress follows the reading" "$halfway" '"progress":0.5'
+
+# A derived measure reads the project's own tasks, so a goal cannot drift from
+# the work underneath it.
+derived="$("${CURL[@]}" -X POST "$BASE/api/goals/$goal_id/key-results" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Delivery\",\"source\":\"tasks_completed\",\"projectId\":\"$project_id\",\"targetValue\":100,\"unit\":\"%\"}")"
+contains "a derived measure is added" "$derived" "Delivery"
+
+derived_kr_id="$("${CURL[@]}" -H "$AUTH" "$BASE/api/goals/$goal_id" \
+    | grep -o '"id":"[^"]*","goalId"' | tail -n 1 | sed 's/"id":"//;s/","goalId"//')"
+check "a computed measure cannot be set by hand" "400" \
+    "$(status_of -X PUT "$BASE/api/goals/$goal_id/key-results/$derived_kr_id" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"value":99}')"
+
+check "a measure taken from tasks needs a project" "400" \
+    "$(status_of -X POST "$BASE/api/goals/$goal_id/key-results" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"name":"Nowhere","source":"tasks_completed"}')"
+check "an unknown measure source is refused" "400" \
+    "$(status_of -X POST "$BASE/api/goals/$goal_id/key-results" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"name":"Vibes","source":"feelings"}')"
+check "an unknown goal status is refused" "400" \
+    "$(status_of -X PUT "$BASE/api/goals/$goal_id" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"status":"probably_fine"}')"
+
+# An organisation-wide goal is not something an ordinary member declares.
+check "member cannot declare an organisation-wide goal" "403" \
+    "$(status_of -X POST "$BASE/api/goals" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Rogue goal"}')"
+check "member cannot delete someone else's goal" "403" \
+    "$(status_of -X DELETE "$BASE/api/goals/$goal_id" -H "$MEMBER_AUTH")"
+
+check "goal deleted" "200" "$(status_of -X DELETE "$BASE/api/goals/$goal_id" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Portfolio, capacity and earned value"
+portfolio="$("${CURL[@]}" -H "$AUTH" "$BASE/api/portfolio")"
+contains "the portfolio reports health" "$portfolio" '"health"'
+contains "it reports progress"          "$portfolio" '"progress"'
+
+# Cross-project reporting names every project and its health, which is exactly
+# what an ordinary member has no standing to read.
+check "member cannot read the portfolio" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/portfolio")"
+check "nor the capacity report" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/portfolio/capacity")"
+
+capacity="$("${CURL[@]}" -H "$AUTH" "$BASE/api/portfolio/capacity")"
+contains "capacity reports committed hours" "$capacity" '"committedHours"'
+contains "against a declared capacity"      "$capacity" '"capacityHours"'
+
+csv="$("${CURL[@]}" -H "$AUTH" "$BASE/api/portfolio/export.csv")"
+contains "the portfolio exports as CSV" "$csv" "key,name,status,health"
+
+# Without an approved plan there is nothing to measure against, and saying so
+# beats returning zeroes that look like data.
+check "earned value needs a baseline first" "404" \
+    "$(status_of -H "$AUTH" "$BASE/api/projects/$project_id/earned-value")"
+
+baseline="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/baselines" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"name":"Smoke baseline"}')"
+contains "a baseline freezes the plan" "$baseline" "Smoke baseline"
+
+evm="$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/earned-value")"
+contains "earned value reports the budget" "$evm" '"bac"'
+contains "and the planned value"           "$evm" '"pv"'
+contains "and what was earned"             "$evm" '"ev"'
+contains "and what it actually cost"       "$evm" '"ac"'
+
+# The indices are always present as keys, carrying either a number or null -
+# never absent. Which of the two they carry depends on whether their
+# denominator is zero, and that distinction is covered by the unit tests.
+contains "the schedule index is reported" "$evm" '"spi"'
+contains "the cost index is reported"     "$evm" '"cpi"'
+
+# The baseline captured the real plan, so the budget cannot be zero.
+if printf '%s' "$evm" | grep -q '"bac":0,'; then
+    fail "the baseline carries the plan's budget" "BAC came back as 0"
+else
+    pass "the baseline carries the plan's budget"
+fi
+
+check "member cannot capture a baseline" "403" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/baselines" -H "$MEMBER_AUTH" \
+        -H 'Content-Type: application/json' -d '{"name":"Rogue"}')"
+
+# ---------------------------------------------------------------------------
+section "Saved dashboard layout"
+# The arrangement used to live in one browser's local storage, so it did not
+# follow anyone to a second machine.
+empty_layout="$("${CURL[@]}" -H "$AUTH" "$BASE/api/dashboard/layout")"
+contains "an unsaved layout is absent, not empty" "$empty_layout" '"layout":null'
+
+saved_layout="$("${CURL[@]}" -X PUT "$BASE/api/dashboard/layout" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"layout":[{"id":"chart-status"},{"id":"kpi-total-tasks"}]}')"
+contains "a layout is saved" "$saved_layout" "chart-status"
+
+contains "and read back in order" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/dashboard/layout")" '"chart-status"'
+
+# Saving again must update the row rather than create a second default.
+"${CURL[@]}" -o /dev/null -X PUT "$BASE/api/dashboard/layout" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"layout":[{"id":"kpi-done-tasks"}]}'
+relayout="$("${CURL[@]}" -H "$AUTH" "$BASE/api/dashboard/layout")"
+contains "saving again replaces the layout" "$relayout" "kpi-done-tasks"
+if printf '%s' "$relayout" | grep -q 'chart-status'; then
+    fail "the old layout is replaced, not merged" "the previous cards are still there"
+else
+    pass "the old layout is replaced, not merged"
+fi
+
+check "a layout is capped in size" "400" \
+    "$(status_of -X PUT "$BASE/api/dashboard/layout" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"layout":[{"id":""}]}')"
+
+check "layout reset" "200" "$(status_of -X DELETE "$BASE/api/dashboard/layout" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Service tokens and SCIM provisioning"
+check "member cannot mint machine credentials" "403" \
+    "$(status_of -X POST "$BASE/api/service-tokens" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"rogue","scopes":["scim"]}')"
+check "a token with no scope is refused" "400" \
+    "$(status_of -X POST "$BASE/api/service-tokens" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"empty","scopes":[]}')"
+check "an unknown scope is refused" "400" \
+    "$(status_of -X POST "$BASE/api/service-tokens" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"broad","scopes":["everything"]}')"
+
+token_response="$("${CURL[@]}" -X POST "$BASE/api/service-tokens" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "{\"name\":\"smoke-scim-$$\",\"scopes\":[\"scim\"]}")"
+token_id="$(json_str "$token_response" id)"
+token_secret="$(json_str "$token_response" secret)"
+contains "the secret is returned once" "$token_response" "pvt_"
+
+# Only the hash is stored, so the listing must never be able to hand it back.
+listed_tokens="$("${CURL[@]}" -H "$AUTH" "$BASE/api/service-tokens")"
+if printf '%s' "$listed_tokens" | grep -q "$token_secret"; then
+    fail "the secret is never readable again" "the listing returned the token"
+else
+    pass "the secret is never readable again"
+fi
+
+SCIM_AUTH="Authorization: Bearer $token_secret"
+check "SCIM refuses an anonymous caller" "401" "$(status_of "$BASE/scim/v2/Users")"
+check "SCIM refuses a user session"      "401" "$(status_of -H "$AUTH" "$BASE/scim/v2/Users")"
+check "SCIM refuses an unknown token"    "401" \
+    "$(status_of -H 'Authorization: Bearer pvt_not-a-real-token' "$BASE/scim/v2/Users")"
+
+scim_list="$("${CURL[@]}" -H "$SCIM_AUTH" "$BASE/scim/v2/Users")"
+contains "SCIM lists users in its own envelope" "$scim_list" "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+
+scim_user="$("${CURL[@]}" -X POST "$BASE/scim/v2/Users" -H "$SCIM_AUTH" \
+    -H 'Content-Type: application/scim+json' \
+    -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:User\"],\"userName\":\"scim_smoke_$$\",\"externalId\":\"idp-$$\",\"displayName\":\"SCIM Smoke\",\"emails\":[{\"value\":\"scim_smoke_$$@example.com\",\"primary\":true}],\"active\":true}")"
+scim_id="$(json_str "$scim_user" id)"
+contains "SCIM provisions an account" "$scim_user" "SCIM Smoke"
+contains "and echoes the external id"  "$scim_user" "idp-$$"
+
+# A provisioning client that retries must not create a duplicate.
+check "a repeated userName is a conflict" "409" \
+    "$(status_of -X POST "$BASE/scim/v2/Users" -H "$SCIM_AUTH" -H 'Content-Type: application/scim+json' \
+        -d "{\"userName\":\"scim_smoke_$$\",\"active\":true}")"
+
+contains "the filter every client sends works" \
+    "$("${CURL[@]}" -H "$SCIM_AUTH" "$BASE/scim/v2/Users?filter=userName%20eq%20%22scim_smoke_$$%22")" \
+    "SCIM Smoke"
+
+# An unsupported filter must be refused rather than quietly returning everyone.
+check "an unsupported filter is refused" "400" \
+    "$(status_of -H "$SCIM_AUTH" "$BASE/scim/v2/Users?filter=displayName%20eq%20%22SCIM%20Smoke%22")"
+
+# Deprovisioning is the whole reason SCIM is here.
+patched="$("${CURL[@]}" -X PATCH "$BASE/scim/v2/Users/$scim_id" -H "$SCIM_AUTH" \
+    -H 'Content-Type: application/scim+json' \
+    -d '{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"active","value":false}]}')"
+contains "a SCIM patch deactivates the account" "$patched" '"active":false'
+
+check "a patch with nothing recognisable is refused" "400" \
+    "$(status_of -X PATCH "$BASE/scim/v2/Users/$scim_id" -H "$SCIM_AUTH" \
+        -H 'Content-Type: application/scim+json' \
+        -d '{"Operations":[{"op":"replace","path":"nickname","value":"x"}]}')"
+
+# A delete deactivates rather than destroying the person's work.
+check "SCIM delete answers 204" "204" \
+    "$(status_of -X DELETE "$BASE/scim/v2/Users/$scim_id" -H "$SCIM_AUTH")"
+still_there="$("${CURL[@]}" -H "$SCIM_AUTH" "$BASE/scim/v2/Users/$scim_id")"
+contains "the account survives as deactivated" "$still_there" '"active":false'
+
+check "a revoked token stops working" "200" "$(status_of -X DELETE "$BASE/api/service-tokens/$token_id" -H "$AUTH")"
+check "and is refused immediately after" "401" "$(status_of -H "$SCIM_AUTH" "$BASE/scim/v2/Users")"
+
+# ---------------------------------------------------------------------------
+section "Privacy: export and erasure"
+export_bundle="$("${CURL[@]}" -H "$AUTH" "$BASE/api/users/$me_id/data-export")"
+contains "an export includes the profile" "$export_bundle" '"profile"'
+contains "and the tasks assigned"         "$export_bundle" '"assignedTasks"'
+contains "and the audit trail"            "$export_bundle" '"auditTrail"'
+
+# The export is about a person, not everything they can see.
+if printf '%s' "$export_bundle" | grep -qi '"password'; then
+    fail "an export carries no credentials" "a password field appears in the bundle"
+else
+    pass "an export carries no credentials"
+fi
+
+check "a member can export their own record" "200" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/users/$member_id/data-export")"
+check "but not somebody else's" "403" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/users/$me_id/data-export")"
+
+check "erasure is not a member's to perform" "403" \
+    "$(status_of -X POST "$BASE/api/users/$me_id/erase" -H "$MEMBER_AUTH" \
+        -H 'Content-Type: application/json' -d "{\"confirm\":\"$ADMIN_USER\"}")"
+# Irreversible, so it takes more than one click.
+check "erasure without confirmation is refused" "400" \
+    "$(status_of -X POST "$BASE/api/users/$scim_id/erase" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{}')"
+check "an administrator cannot erase themselves" "400" \
+    "$(status_of -X POST "$BASE/api/users/$me_id/erase" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d "{\"confirm\":\"$ADMIN_USER\"}")"
+
+erased="$(status_of -X POST "$BASE/api/users/$scim_id/erase" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_$$\"}")"
+check "an administrator can erase an account" "200" "$erased"
+
+after_erasure="$("${CURL[@]}" -H "$AUTH" "$BASE/api/users/$scim_id")"
+contains "the account becomes a tombstone" "$after_erasure" "Deleted user"
+if printf '%s' "$after_erasure" | grep -q "scim_smoke_$$@example.com"; then
+    fail "identifiers are gone after erasure" "the original e-mail is still there"
+else
+    pass "identifiers are gone after erasure"
+fi
+
+# Erasure anonymises rather than deletes: destroying the row would cascade
+# through work that belongs to the organisation and punch holes in the trail.
+contains "the audit trail records the erasure" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=privacy.erased")" "privacy.erased"
+
+# Repeating it must not rename the tombstone again.
+check "erasure is idempotent" "400" \
+    "$(status_of -X POST "$BASE/api/users/$scim_id/erase" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_$$\"}")"
+
+# ---------------------------------------------------------------------------
+section "Single sign-on"
+sso_config="$("${CURL[@]}" "$BASE/api/auth/oidc/config")"
+contains "the login screen can ask whether SSO is on" "$sso_config" '"enabled"'
+# Disabled in this deployment, so the flow must say so rather than half-start.
+check "starting a flow that is not configured is refused" "404" \
+    "$(status_of "$BASE/api/auth/oidc/start")"
+
+# ---------------------------------------------------------------------------
 section "Search and pagination"
 check "task search endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/tasks?limit=5")"
 

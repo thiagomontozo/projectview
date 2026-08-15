@@ -21,6 +21,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"projectview/internal/auth"
 	"projectview/internal/config"
 	"projectview/internal/db"
 	"projectview/internal/handlers"
@@ -66,6 +67,16 @@ func main() {
 	alertScheduler.Start()
 
 	services.NewDigestScheduler(api.Preferences, mailer).Start()
+
+	// Retention does nothing unless a policy is configured; see the comment on
+	// RetentionSweeper for why the default is to keep everything.
+	services.NewRetentionSweeper(api.Privacy, cfg.Retention).Start()
+
+	if cfg.OIDC.Enabled {
+		api.OIDC = auth.NewOIDC(cfg)
+		logger.Info("Single sign-on enabled against %s (auto-provision: %v)",
+			cfg.OIDC.IssuerURL, cfg.OIDC.AutoProvision)
+	}
 
 	// Presence and typing payloads carry a display name, so clients do not
 	// have to hold the whole directory to render "Ana is typing".

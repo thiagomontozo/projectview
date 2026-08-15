@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { useAuth } from '../lib/auth';
 import { errorMessage } from '../lib/api';
+import { useSSOConfig } from '../lib/enterprise';
 import { Button } from '../ui/Button';
 import { Field, Input } from '../ui/Field';
 import controls from '../ui/controls.module.css';
@@ -18,6 +19,12 @@ export default function LoginPage() {
   const [mode, setMode] = useState<'ad' | 'local'>('ad');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const sso = useSSOConfig();
+  // Single sign-on failures come back as a redirect carrying the reason, since
+  // the browser left this page entirely to attempt them.
+  const [searchParams] = useSearchParams();
+  const ssoError = searchParams.get('error');
 
   // Redirect declaratively. Navigating during render, as the previous version
   // did, mutates router state mid-render and warns in React 18.
@@ -111,15 +118,34 @@ export default function LoginPage() {
             )}
           </Field>
 
-          {error && (
+          {(error || ssoError) && (
             <p className={styles.error} role="alert">
-              {error}
+              {error || ssoError}
             </p>
           )}
 
           <Button type="submit" variant="primary" size="lg" block loading={busy}>
             {busy ? t('auth.signingIn') : t('auth.signIn')}
           </Button>
+
+          {sso.data?.enabled && (
+            <>
+              <div className={styles.separator}>
+                <span>{t('auth.or')}</span>
+              </div>
+              {/* A link, not a fetch: the whole point of the flow is that the
+                  browser leaves for the identity provider and comes back. */}
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                block
+                onClick={() => window.location.assign('/api/auth/oidc/start')}
+              >
+                {t('auth.signInWithSSO')}
+              </Button>
+            </>
+          )}
         </form>
       </main>
     </div>

@@ -60,6 +60,20 @@ const (
 	ActionFolderUpdated = "folder.updated"
 	ActionFolderDeleted = "folder.deleted"
 
+	ActionGoalCreated     = "goal.created"
+	ActionGoalUpdated     = "goal.updated"
+	ActionGoalDeleted     = "goal.deleted"
+	ActionBaselineCapture = "baseline.captured"
+
+	// Machine credentials and the privacy rights are the entries an auditor
+	// actually comes looking for, so they are recorded like any mutation.
+	ActionTokenCreated = "token.created"
+	ActionTokenRevoked = "token.revoked"
+	ActionDataExported = "privacy.exported"
+	ActionUserErased   = "privacy.erased"
+	ActionRetention    = "privacy.retention_purge"
+	ActionSCIMProvison = "scim.provisioned"
+
 	ActionPermissionDenied = "access.denied"
 )
 

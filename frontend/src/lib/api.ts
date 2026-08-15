@@ -73,6 +73,20 @@ export function setSessionExpiredHandler(handler: () => void) {
   onSessionExpired = handler;
 }
 
+/**
+ * Whether a failed refresh means a session actually ended.
+ *
+ * Only when the client believed it had one. A visitor who is simply not signed
+ * in also gets a 401 from /auth/me and also fails to refresh — but for them
+ * that is the normal state, not an expiry, and treating it as one is a loop:
+ * the handler clears the query cache, the cleared `me` query immediately
+ * refetches, gets another 401, and clears the cache again. The `me` query never
+ * settles, `loading` never becomes false, and the login screen never renders.
+ */
+export function endsSession(hadToken: boolean, refreshedToken: string | null): boolean {
+  return hadToken && refreshedToken === null;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -85,6 +99,8 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && original && !original._retried && !isAuthEndpoint) {
       original._retried = true;
+      // Read before the refresh attempt clears it.
+      const hadToken = getToken() !== null;
 
       refreshInFlight = refreshInFlight ?? refreshAccessToken().finally(() => {
         refreshInFlight = null;
@@ -96,7 +112,9 @@ api.interceptors.response.use(
         return api(original);
       }
 
-      onSessionExpired?.();
+      if (endsSession(hadToken, token)) {
+        onSessionExpired?.();
+      }
     }
 
     return Promise.reject(error);
@@ -122,4 +140,16 @@ export function errorMessage(error: unknown, fallback: string): string {
 
 export function statusOf(error: unknown): number | undefined {
   return axios.isAxiosError(error) ? error.response?.status : undefined;
+}
+
+/**
+ * Starts a file download from the API.
+ *
+ * A plain navigation rather than a fetch-and-blob: the response carries
+ * Content-Disposition, so the browser saves it and stays on the page, and the
+ * session cookie authenticates it. Building a blob would mean holding the
+ * whole export in memory to achieve exactly the same result.
+ */
+export function downloadUrl(path: string) {
+  window.location.assign(`/api${path}`);
 }

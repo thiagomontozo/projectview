@@ -2,7 +2,7 @@
 // (see backend/internal/models, internal/repo and internal/handlers).
 
 export type Role = 'admin' | 'manager' | 'member';
-export type AuthSource = 'local' | 'ad';
+export type AuthSource = 'local' | 'ad' | 'oidc' | 'scim';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type ProjectStatusState = 'planning' | 'active' | 'on_hold' | 'completed' | 'archived';
 /** Role held on a Space; grants flow down to everything inside it. */
@@ -24,6 +24,8 @@ export interface User extends PublicUser {
   teams: string[];
   active: boolean;
   notifyByEmail: boolean;
+  /** Hours a week this person is available for; capacity planning uses it. */
+  weeklyCapacityHours: number;
   lastLoginAt?: string;
   createdAt: string;
   updatedAt: string;

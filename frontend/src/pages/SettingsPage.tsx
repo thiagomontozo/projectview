@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as SwitchPrimitive from '@radix-ui/react-switch';
 import { PageHeader } from '../app/AppShell';
@@ -13,6 +14,13 @@ import {
   useSaveNotificationPreferences,
   useSessions
 } from '../lib/queries';
+import {
+  useCreateServiceToken,
+  useRevokeServiceToken,
+  useServiceTokens,
+  useUpdateUser
+} from '../lib/enterprise';
+import { downloadUrl } from '../lib/api';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import { Shield, Monitor } from '../ui/icons';
 import controls from '../ui/controls.module.css';
@@ -87,7 +95,13 @@ export default function SettingsPage() {
 
       <NotificationPreferencesCard />
 
+      <CapacityCard />
+
+      <PrivacyCard />
+
       <SessionsCard />
+
+      {user?.role === 'admin' && <ServiceTokensCard />}
     </>
   );
 }
@@ -222,6 +236,191 @@ function NotificationPreferencesCard() {
             </select>
           </div>
         )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * The hours a week this person is available for.
+ *
+ * Capacity planning compares committed work against this number; without it
+ * the report would have to assume everyone is a full-time forty, which is the
+ * assumption that makes such reports useless in an organisation with part-time
+ * people and shared allocations.
+ */
+function CapacityCard() {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { user } = useAuth();
+  const updateUser = useUpdateUser();
+  const [hours, setHours] = useState<string>();
+
+  const current = hours ?? String(user?.weeklyCapacityHours ?? 40);
+
+  return (
+    <div className={styles.settingsSection}>
+      <Card>
+        <CardHeader title={t('settings.capacity')} />
+        <p className={styles.muted}>{t('settings.capacityHint')}</p>
+
+        <div className={styles.settingRow}>
+          <label htmlFor="weekly-capacity">{t('settings.weeklyHours')}</label>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            <input
+              id="weekly-capacity"
+              className={controls.input}
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              max={168}
+              value={current}
+              onChange={(event) => setHours(event.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={updateUser.isPending}
+              onClick={() =>
+                user &&
+                updateUser.mutate(
+                  { id: user.id, weeklyCapacityHours: Number(current) },
+                  { onSuccess: () => toast.success(t('settings.preferencesSaved')) }
+                )
+              }
+            >
+              {t('common.save')}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * The export half of the two privacy rights.
+ *
+ * Erasure is deliberately not here: it is irreversible, it is an
+ * administrator's action, and a button next to "download my data" is a button
+ * somebody eventually presses by accident.
+ */
+function PrivacyCard() {
+  const { t } = useTranslation();
+  const { user } = useAuth();
+
+  return (
+    <div className={styles.settingsSection}>
+      <Card>
+        <CardHeader title={t('settings.privacy')} />
+        <p className={styles.muted}>{t('settings.privacyHint')}</p>
+        <Button variant="secondary" disabled={!user} onClick={() => user && downloadUrl(`/users/${user.id}/data-export`)}>
+          {t('settings.downloadMyData')}
+        </Button>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Machine credentials, for SCIM provisioning and read-only reporting.
+ *
+ * The secret is shown exactly once, in the response that created it. Only its
+ * hash is stored, so there is no second chance and the screen says so.
+ */
+function ServiceTokensCard() {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { data: tokens, isLoading } = useServiceTokens();
+  const createToken = useCreateServiceToken();
+  const revokeToken = useRevokeServiceToken();
+
+  const [name, setName] = useState('');
+  const [scopes, setScopes] = useState<string[]>(['scim']);
+  const [issued, setIssued] = useState<string>();
+
+  const toggleScope = (scope: string) =>
+    setScopes((current) =>
+      current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]
+    );
+
+  return (
+    <div className={styles.settingsSection}>
+      <Card>
+        <CardHeader title={t('settings.serviceTokens')} />
+        <p className={styles.muted}>{t('settings.serviceTokensHint')}</p>
+
+        {issued && (
+          <div className={styles.tokenReveal} role="alert">
+            <strong>{t('settings.tokenShownOnce')}</strong>
+            <code className={styles.tokenSecret}>{issued}</code>
+          </div>
+        )}
+
+        <div className={styles.settingRow}>
+          <input
+            className={controls.input}
+            placeholder={t('settings.tokenName')}
+            aria-label={t('settings.tokenName')}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+            {['scim', 'reports'].map((scope) => (
+              <label key={scope} className={styles.subtle} style={{ display: 'flex', gap: 4 }}>
+                <input type="checkbox" checked={scopes.includes(scope)} onChange={() => toggleScope(scope)} />
+                {scope}
+              </label>
+            ))}
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!name || scopes.length === 0}
+              loading={createToken.isPending}
+              onClick={() =>
+                createToken.mutate(
+                  { name, scopes },
+                  {
+                    onSuccess: (token) => {
+                      setIssued(token.secret);
+                      setName('');
+                      toast.success(t('settings.tokenCreated'));
+                    },
+                    onError: () => toast.error(t('errors.genericBody'))
+                  }
+                )
+              }
+            >
+              {t('common.create')}
+            </Button>
+          </div>
+        </div>
+
+        {isLoading && <SkeletonList rows={2} height={36} label={t('common.loading')} />}
+
+        {tokens?.map((token) => (
+          <div key={token.id} className={styles.sessionRow}>
+            <Shield size={18} />
+            <div className={styles.sessionInfo}>
+              <div className={styles.sessionAgent}>{token.name}</div>
+              <div className={styles.subtle}>{token.scopes.join(', ') || '—'}</div>
+            </div>
+            {token.revokedAt ? (
+              <Badge tone="neutral">{t('settings.revoked')}</Badge>
+            ) : (
+              <Button
+                variant="dangerGhost"
+                size="sm"
+                loading={revokeToken.isPending && revokeToken.variables === token.id}
+                onClick={() =>
+                  revokeToken.mutate(token.id, { onSuccess: () => toast.success(t('settings.revoked')) })
+                }
+              >
+                {t('settings.revoke')}
+              </Button>
+            )}
+          </div>
+        ))}
       </Card>
     </div>
   );
