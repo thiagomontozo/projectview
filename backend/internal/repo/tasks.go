@@ -21,13 +21,14 @@ func NewTasks(store *db.Store) *Tasks { return &Tasks{store: store} }
 const taskColumns = `
 	t.id, t.title, t.description, t.project_id, t.parent_task_id, t.status,
 	t.priority, t.start_date, t.due_date, t.completed_at, t.estimate_hours,
-	t.position, t.created_by, t.created_at, t.updated_at`
+	t.position, t.created_by, t.created_at, t.updated_at, t.custom_fields`
 
 func scanTask(row pgx.Row) (*models.Task, error) {
 	var t models.Task
 	err := row.Scan(&t.ID, &t.Title, &t.Description, &t.ProjectID, &t.ParentTask,
 		&t.Status, &t.Priority, &t.StartDate, &t.DueDate, &t.CompletedAt,
-		&t.EstimateHours, &t.Order, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
+		&t.EstimateHours, &t.Order, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
+		&t.CustomFields)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -38,6 +39,11 @@ func scanTask(row pgx.Row) (*models.Task, error) {
 	t.Tags = []string{}
 	t.Checklist = []models.ChecklistItem{}
 	t.Comments = []models.Comment{}
+	if t.CustomFields == nil {
+		// Keep it {} rather than null, so clients can index into it without
+		// a guard on every read.
+		t.CustomFields = map[string]any{}
+	}
 	return &t, nil
 }
 

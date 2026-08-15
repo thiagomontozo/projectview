@@ -370,6 +370,140 @@ check "the user can sign in with the reset password" "200" "$(status_of -H "$MEM
 contains "the project was never hijacked" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id")" "Smoke Test Project"
 
 # ---------------------------------------------------------------------------
+section "Dependencies and the critical path"
+
+# A second and third task, so there is a chain to reason about.
+second="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/tasks" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"title":"Smoke second task","startDate":"2026-02-01T00:00:00Z","dueDate":"2026-02-10T00:00:00Z"}')"
+second_id="$(json_str "$second" id)"
+third="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/tasks" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"title":"Smoke third task","startDate":"2026-02-11T00:00:00Z","dueDate":"2026-02-20T00:00:00Z"}')"
+third_id="$(json_str "$third" id)"
+
+check "dependency created" "201" \
+    "$(status_of -X POST "$BASE/api/tasks/$second_id/dependencies" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d "{\"dependsOn\":\"$task_id\"}")"
+check "chained dependency created" "201" \
+    "$(status_of -X POST "$BASE/api/tasks/$third_id/dependencies" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d "{\"dependsOn\":\"$second_id\"}")"
+
+# A cycle makes the schedule unsolvable, so the database refuses the edge.
+check "a dependency cycle is refused" "409" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/dependencies" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d "{\"dependsOn\":\"$third_id\"}")"
+check "a task cannot depend on itself" "400" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/dependencies" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d "{\"dependsOn\":\"$task_id\"}")"
+
+schedule="$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/schedule")"
+contains "schedule returns the dependency edges" "$schedule" '"dependencies"'
+contains "the critical path spans the chain"     "$schedule" "$second_id"
+contains "blocked tasks are reported"            "$schedule" '"blocked"'
+
+check "dependency removed" "200" \
+    "$(status_of -X DELETE "$BASE/api/tasks/$third_id/dependencies/$second_id" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Custom fields"
+field="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/fields" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"key":"client","label":"Client","type":"select","options":["Acme","Globex"]}')"
+field_id="$(json_str "$field" id)"
+if [ -n "$field_id" ]; then
+    pass "custom field defined"
+else
+    fail "custom field defined" "$field"
+fi
+
+check "a select field needs options" "400" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/fields" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"key":"bad","label":"Bad","type":"select","options":[]}')"
+check "an unknown field type is refused" "400" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/fields" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"key":"weird","label":"Weird","type":"richtext"}')"
+
+contains "the field is listed for the project" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/fields")" '"key":"client"'
+
+valued="$("${CURL[@]}" -X PUT "$BASE/api/tasks/$task_id/fields" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"client":"Acme"}')"
+contains "the value is stored on the task" "$valued" "Acme"
+
+# Merging, not replacing: writing one field must not erase another.
+"${CURL[@]}" -X PUT "$BASE/api/tasks/$task_id/fields" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"other":"kept"}' > /dev/null
+merged="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id")"
+contains "writing one field preserves the others" "$merged" "Acme"
+
+# ---------------------------------------------------------------------------
+section "Time tracking"
+check "timer started" "201" "$(status_of -X POST "$BASE/api/tasks/$task_id/time/start" -H "$AUTH")"
+# One running timer per person, enforced by a partial unique index.
+check "a second timer is refused" "409" \
+    "$(status_of -X POST "$BASE/api/tasks/$second_id/time/start" -H "$AUTH")"
+contains "the running timer is reported" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/time/running")" "$task_id"
+check "timer stopped" "200" "$(status_of -X POST "$BASE/api/time/stop" -H "$AUTH")"
+check "stopping with no timer running is a 404" "404" "$(status_of -X POST "$BASE/api/time/stop" -H "$AUTH")"
+
+check "time logged manually" "201" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/time" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"minutes":90,"note":"smoke"}')"
+check "zero minutes is refused" "400" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/time" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"minutes":0}')"
+contains "entries are listed with their author" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id/time")" '"user"'
+
+# ---------------------------------------------------------------------------
+section "Watchers"
+check "task watched"   "200" "$(status_of -X POST   "$BASE/api/tasks/$task_id/watch" -H "$AUTH")"
+check "task unwatched" "200" "$(status_of -X DELETE "$BASE/api/tasks/$task_id/watch" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Automations"
+automation="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/automations" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Urgent when in review","trigger":"task.status_changed",
+         "conditions":[{"field":"status","op":"eq","value":"review"}],
+         "actions":[{"type":"set_priority","priority":"urgent"}]}')"
+automation_id="$(json_str "$automation" id)"
+if [ -n "$automation_id" ]; then
+    pass "automation created"
+else
+    fail "automation created" "$automation"
+fi
+
+check "an automation needs an action" "400" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/automations" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Empty","trigger":"task.created","actions":[]}')"
+check "an unknown trigger is refused" "400" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/automations" -H "$AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Bad","trigger":"task.exploded","actions":[{"type":"notify"}]}')"
+
+# The rule fires end to end: moving the task to "review" must raise its
+# priority to urgent without anyone asking.
+"${CURL[@]}" -X PATCH "$BASE/api/tasks/$second_id/move" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"status":"review","order":0}' > /dev/null
+sleep 1
+after="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$second_id")"
+contains "the automation applied its action" "$after" '"priority":"urgent"'
+
+runs="$("${CURL[@]}" -H "$AUTH" "$BASE/api/automations/$automation_id/runs")"
+contains "the run was recorded" "$runs" '"status":"applied"'
+
+# A rule whose conditions do not hold is recorded as skipped, with the reason -
+# an automation that silently does nothing is impossible to debug.
+"${CURL[@]}" -X PATCH "$BASE/api/tasks/$second_id/move" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"status":"todo","order":0}' > /dev/null
+sleep 1
+contains "a non-matching run is recorded as skipped" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/automations/$automation_id/runs")" '"status":"skipped"'
+
+check "member cannot create automations" "403" \
+    "$(status_of -X POST "$BASE/api/projects/$project_id/automations" -H "$MEMBER_AUTH" \
+        -H 'Content-Type: application/json' \
+        -d '{"name":"Rogue","trigger":"task.created","actions":[{"type":"notify"}]}')"
+
+# ---------------------------------------------------------------------------
 section "Sessions and revocation"
 sessions="$("${CURL[@]}" -H "$AUTH" "$BASE/api/auth/sessions")"
 contains "the current session is listed" "$sessions" '"current":true'

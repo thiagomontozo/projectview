@@ -55,7 +55,12 @@ func main() {
 
 	mailer := services.NewMailer(cfg)
 	notifier := services.NewNotifier(api.Notifications, api.Users, hub, mailer)
-	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier)
+
+	// The engine needs the notifier, and the handlers need the engine, so it
+	// is attached after both exist rather than built inside handlers.New.
+	api.Engine = services.NewAutomationEngine(api.Automations, api.Tasks, api.Watchers, notifier)
+
+	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier, api.Engine)
 	alertScheduler.Start()
 
 	// Expired and revoked sessions accumulate forever otherwise; prune them

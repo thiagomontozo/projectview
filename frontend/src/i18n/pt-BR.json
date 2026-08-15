@@ -122,7 +122,20 @@
     "priorityLow": "Baixa",
     "priorityMedium": "Média",
     "priorityHigh": "Alta",
-    "priorityUrgent": "Urgente"
+    "priorityUrgent": "Urgente",
+    "customFields": "Campos personalizados",
+    "time": "Tempo",
+    "startTimer": "Iniciar timer",
+    "stopTimer": "Parar timer",
+    "logTime": "Registrar",
+    "minutes": "minutos",
+    "running": "em andamento",
+    "timerAlreadyRunning": "Você já tem um timer rodando. Pare-o primeiro.",
+    "trackedOfEstimate": "{{tracked}}h de {{estimate}}h estimadas",
+    "dependencies": "Depende de",
+    "blockedBy": "Bloqueada por {{title}}",
+    "watch": "Acompanhar",
+    "unwatch": "Deixar de acompanhar"
   },
   "myTasks": {
     "title": "Minhas tarefas",
@@ -261,6 +274,7 @@
     "workloadCell": "{{hours}}h de {{capacity}}h · {{count}} tarefa(s)",
     "loadLight": "Folga",
     "loadFull": "Perto da capacidade",
-    "loadOver": "Acima de {{capacity}}h/semana"
+    "loadOver": "Acima de {{capacity}}h/semana",
+    "criticalPath": "Caminho crítico"
   }
 }

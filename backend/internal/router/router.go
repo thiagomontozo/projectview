@@ -113,6 +113,30 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Delete("/{id}", api.DeleteProject)
 		r.Get("/{projectId}/tasks", api.ListTasksForProject)
 		r.Post("/{projectId}/tasks", api.CreateTaskForProject)
+		// Everything the timeline needs to draw arrows and highlight the
+		// chain where a slip moves the end date.
+		r.Get("/{projectId}/schedule", api.ProjectSchedule)
+		r.Get("/{projectId}/fields", api.ListCustomFields)
+		r.Post("/{projectId}/fields", api.CreateCustomField)
+		r.Get("/{projectId}/automations", api.ListAutomations)
+		r.Post("/{projectId}/automations", api.CreateAutomation)
+	})
+
+	r.Route("/api/fields", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Delete("/{id}", api.DeleteCustomField)
+	})
+
+	r.Route("/api/automations", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Delete("/{id}", api.DeleteAutomation)
+		r.Get("/{id}/runs", api.AutomationRuns)
+	})
+
+	r.Route("/api/time", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/running", api.RunningTimer)
+		r.Post("/stop", api.StopTimer)
 	})
 
 	r.Route("/api/tasks", func(r chi.Router) {
@@ -125,6 +149,18 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Patch("/{id}/move", api.MoveTask)
 		r.Delete("/{id}", api.DeleteTask)
 		r.Post("/{id}/comments", api.AddComment)
+
+		r.Post("/{id}/dependencies", api.AddDependency)
+		r.Delete("/{id}/dependencies/{dependsOn}", api.RemoveDependency)
+
+		r.Put("/{id}/fields", api.SetTaskCustomFields)
+
+		r.Get("/{id}/time", api.TaskTimeEntries)
+		r.Post("/{id}/time", api.LogTime)
+		r.Post("/{id}/time/start", api.StartTimer)
+
+		r.Post("/{id}/watch", api.WatchTask)
+		r.Delete("/{id}/watch", api.UnwatchTask)
 	})
 
 	r.Route("/api/chat", func(r chi.Router) {

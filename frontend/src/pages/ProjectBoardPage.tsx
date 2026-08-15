@@ -16,7 +16,7 @@ import { CalendarView } from '../views/CalendarView';
 import { TimelineView } from '../views/TimelineView';
 import { WorkloadView } from '../views/WorkloadView';
 import { applyView, useViewState } from '../views/useViewState';
-import { useMoveTask, useProject, useProjectTasks, useSaveTask, useUsers } from '../lib/queries';
+import { useMoveTask, useProject, useProjectTasks, useSaveTask, useSchedule, useUsers } from '../lib/queries';
 import { statusOf } from '../lib/api';
 import type { Task } from '../types';
 
@@ -30,13 +30,17 @@ export default function ProjectBoardPage() {
   const { t } = useTranslation();
   const toast = useToast();
 
+  const view = useViewState(id);
+
   const project = useProject(id);
   const tasks = useProjectTasks(id);
   const { data: allUsers = [] } = useUsers();
+  // Only the timeline draws arrows, so the schedule is not fetched for the
+  // other views.
+  const schedule = useSchedule(view.state.kind === 'timeline' ? id : undefined);
   const moveTask = useMoveTask();
   const saveTask = useSaveTask();
 
-  const view = useViewState(id);
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -196,6 +200,8 @@ export default function ProjectBoardPage() {
               tasks={visible}
               onOpenTask={(task) => setModal({ task })}
               onReschedule={(taskId, startDate, dueDate) => patchTask(taskId, { startDate, dueDate })}
+              dependencies={schedule.data?.dependencies}
+              criticalPath={schedule.data?.criticalPath}
             />
           )}
 

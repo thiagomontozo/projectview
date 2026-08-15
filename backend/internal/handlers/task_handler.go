@@ -336,6 +336,16 @@ func (a *API) createTask(w http.ResponseWriter, r *http.Request, req createTaskR
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Automations run after the task exists and the response is decided, and
+	// never fail the request - see services.AutomationEngine.
+	a.Engine.Run(ctx, services.Event{
+		Trigger:   services.TriggerTaskCreated,
+		Task:      created,
+		ProjectID: projectID,
+		ActorID:   requester.ID,
+	})
+
 	httpx.JSON(w, http.StatusCreated, a.populateTask(ctx, *created, false))
 }
 
@@ -453,6 +463,25 @@ func (a *API) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		respondRepoError(w, err, "Task not found.")
 		return
 	}
+
+	if req.Status != nil && *req.Status != existing.Status {
+		a.Engine.Run(ctx, services.Event{
+			Trigger:        services.TriggerTaskStatusChanged,
+			Task:           updated,
+			ProjectID:      existing.ProjectID,
+			ActorID:        requester.ID,
+			PreviousStatus: existing.Status,
+		})
+	}
+	if req.Assignees != nil {
+		a.Engine.Run(ctx, services.Event{
+			Trigger:   services.TriggerTaskAssigned,
+			Task:      updated,
+			ProjectID: existing.ProjectID,
+			ActorID:   requester.ID,
+		})
+	}
+
 	httpx.JSON(w, http.StatusOK, a.populateTask(ctx, *updated, false))
 }
 
@@ -495,6 +524,18 @@ func (a *API) MoveTask(w http.ResponseWriter, r *http.Request) {
 		respondRepoError(w, err, "Task not found.")
 		return
 	}
+
+	// Moving a card is a status change like any other, so the same rules fire.
+	if req.Status != nil && *req.Status != existing.Status {
+		a.Engine.Run(r.Context(), services.Event{
+			Trigger:        services.TriggerTaskStatusChanged,
+			Task:           t,
+			ProjectID:      existing.ProjectID,
+			ActorID:        auth.CurrentUser(r).ID,
+			PreviousStatus: existing.Status,
+		})
+	}
+
 	httpx.JSON(w, http.StatusOK, t)
 }
 

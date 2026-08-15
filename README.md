@@ -37,6 +37,19 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
 - **Dashboard with draggable cards** — the landing dashboard is a grid of
   cards (KPIs + charts) that can be rearranged by drag-and-drop, with the
   chosen order persisted per user in the browser.
+- **Task dependencies and the critical path** — a task can wait on another;
+  cycles are refused by the database, since they make the schedule unsolvable.
+  The timeline draws the arrows and highlights the chain where any slip moves
+  the project's end date.
+- **Custom fields** — typed per project or space (text, number, date, select,
+  multi-select, checkbox, url, email, user), stored as JSONB with a GIN index.
+- **Time tracking** — a timer (one per person, enforced by the database),
+  manual entries, and tracked hours against the estimate.
+- **Watchers** — follow a task without being responsible for it.
+- **Automations** — `trigger → condition → action` rules that set status or
+  priority, assign, add watchers or notify. Every evaluation is recorded,
+  including the ones whose conditions did not hold, because a rule that
+  silently does not fire is otherwise impossible to debug.
 - **Six views over the same tasks** — every project can be seen as a **Board**
   (kanban, drag between columns), a **List** (grouped and virtualised), a
   **Table** (spreadsheet-style inline editing), a **Calendar**, a **Timeline**
@@ -380,13 +393,19 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-107 assertions covering the proxy (HTTPS redirect, security headers, the
+138 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
 and its `completedAt` handling, search and pagination, the audit trail, the
 dashboard aggregations, chat, the WebSocket upgrade, readiness, and the login
 rate limit. It cleans up the fixtures it creates.
+
+It also drives the product engine end to end: a dependency chain and its
+critical path, a refused cycle, custom field values surviving a partial write,
+the one-timer-per-person rule, and an automation that raises a task's priority
+when its status changes — including the run log entry proving a non-matching
+rule was recorded as skipped rather than silently ignored.
 
 **Frontend tests** — 33 assertions over the pure view logic (filtering,
 sorting, grouping) and the accessibility contracts of the primitives:

@@ -77,6 +77,10 @@ export const keys = {
   task: (id: string) => ['tasks', id] as const,
   myTasks: ['tasks', 'mine'] as const,
   taskSearch: (query: string) => ['tasks', 'search', query] as const,
+  schedule: (projectId: string) => ['projects', projectId, 'schedule'] as const,
+  customFields: (projectId: string) => ['projects', projectId, 'fields'] as const,
+  taskTime: (taskId: string) => ['tasks', taskId, 'time'] as const,
+  runningTimer: ['time', 'running'] as const,
   channels: ['chat', 'channels'] as const,
   messages: (channelId: string) => ['chat', channelId, 'messages'] as const,
   notifications: ['notifications'] as const,
@@ -304,6 +308,157 @@ export function useAddComment() {
     mutationFn: ({ taskId, body }: { taskId: string; body: string }) =>
       api.post<Task>(`/tasks/${taskId}/comments`, { body }).then((r) => r.data),
     onSuccess: (_task, { taskId }) => client.invalidateQueries({ queryKey: keys.task(taskId) })
+  });
+}
+
+/* --- Schedule: dependencies and the critical path -------------------------------- */
+
+export interface Dependency {
+  taskId: string;
+  dependsOn: string;
+  type: string;
+  lagDays: number;
+}
+
+export interface BlockedTask {
+  taskId: string;
+  blockerId: string;
+  blockerTitle: string;
+}
+
+export interface Schedule {
+  dependencies: Dependency[];
+  /** Ids on the longest weighted chain — where a slip moves the end date. */
+  criticalPath: string[];
+  blocked: BlockedTask[];
+}
+
+export function useSchedule(projectId: string | undefined) {
+  return useQuery({
+    queryKey: keys.schedule(projectId ?? ''),
+    queryFn: () => get<Schedule>(`/projects/${projectId}/schedule`),
+    enabled: Boolean(projectId)
+  });
+}
+
+export function useAddDependency() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, dependsOn }: { taskId: string; dependsOn: string; projectId: string }) =>
+      api.post(`/tasks/${taskId}/dependencies`, { dependsOn }),
+    onSuccess: (_data, { projectId }) => client.invalidateQueries({ queryKey: keys.schedule(projectId) })
+  });
+}
+
+export function useRemoveDependency() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, dependsOn }: { taskId: string; dependsOn: string; projectId: string }) =>
+      api.delete(`/tasks/${taskId}/dependencies/${dependsOn}`),
+    onSuccess: (_data, { projectId }) => client.invalidateQueries({ queryKey: keys.schedule(projectId) })
+  });
+}
+
+/* --- Custom fields ---------------------------------------------------------------- */
+
+export interface FieldDefinition {
+  id: string;
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select' | 'multi_select' | 'checkbox' | 'url' | 'email' | 'user';
+  options: string[];
+  required: boolean;
+  position: number;
+}
+
+export function useCustomFields(projectId: string | undefined) {
+  return useQuery({
+    queryKey: keys.customFields(projectId ?? ''),
+    queryFn: () => get<FieldDefinition[]>(`/projects/${projectId}/fields`),
+    enabled: Boolean(projectId),
+    staleTime: 5 * 60_000
+  });
+}
+
+export function useSetTaskFields() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, values }: { taskId: string; values: Record<string, unknown> }) =>
+      api.put<Task>(`/tasks/${taskId}/fields`, values).then((r) => r.data),
+    onSuccess: (_task, { taskId }) => client.invalidateQueries({ queryKey: keys.task(taskId) })
+  });
+}
+
+/* --- Time tracking ------------------------------------------------------------------ */
+
+export interface TimeEntry {
+  id: string;
+  taskId: string;
+  userId: string;
+  startedAt: string;
+  endedAt?: string;
+  seconds: number;
+  note?: string;
+  user?: PublicUser;
+}
+
+export function useRunningTimer() {
+  return useQuery({
+    queryKey: keys.runningTimer,
+    queryFn: () => get<TimeEntry | null>('/time/running'),
+    // A running timer is wall-clock state, so it is refreshed on an interval
+    // rather than trusted to stay accurate.
+    refetchInterval: 30_000
+  });
+}
+
+export function useTaskTime(taskId: string | undefined) {
+  return useQuery({
+    queryKey: keys.taskTime(taskId ?? ''),
+    queryFn: () => get<TimeEntry[]>(`/tasks/${taskId}/time`),
+    enabled: Boolean(taskId)
+  });
+}
+
+export function useStartTimer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.post<TimeEntry>(`/tasks/${taskId}/time/start`).then((r) => r.data),
+    onSuccess: (_entry, taskId) => {
+      client.invalidateQueries({ queryKey: keys.runningTimer });
+      client.invalidateQueries({ queryKey: keys.taskTime(taskId) });
+    }
+  });
+}
+
+export function useStopTimer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<TimeEntry>('/time/stop').then((r) => r.data),
+    onSuccess: (entry) => {
+      client.invalidateQueries({ queryKey: keys.runningTimer });
+      if (entry?.taskId) client.invalidateQueries({ queryKey: keys.taskTime(entry.taskId) });
+    }
+  });
+}
+
+export function useLogTime() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, minutes, note }: { taskId: string; minutes: number; note?: string }) =>
+      api.post<TimeEntry>(`/tasks/${taskId}/time`, { minutes, note }).then((r) => r.data),
+    onSuccess: (_entry, { taskId }) => client.invalidateQueries({ queryKey: keys.taskTime(taskId) })
+  });
+}
+
+/* --- Watchers -------------------------------------------------------------------------- */
+
+export function useWatchTask() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, watching }: { taskId: string; watching: boolean }) =>
+      watching ? api.post(`/tasks/${taskId}/watch`) : api.delete(`/tasks/${taskId}/watch`),
+    onSuccess: (_data, { taskId }) => client.invalidateQueries({ queryKey: keys.task(taskId) })
   });
 }
 

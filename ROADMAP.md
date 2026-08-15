@@ -12,19 +12,19 @@ Where the project stands and what is left. Updated as each phase lands.
 Phase 0  Security containment        ████████████████████  100%   ✅
 Phase A1 PostgreSQL foundation       ████████████████████  100%   ✅
 Phase A2 Domain, security, ops       ████████████████░░░░   80%   ✅
-Phase A3 Product engine              ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase A3 Product engine              ████████████████░░░░   80%   ✅
 Phase B1 UI foundation               ████████████████████  100%   ✅
 Phase B2 Views                       ████████████████░░░░   80%   ✅
 Phase B3 Collaboration               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
                                      ─────────────────────
-                              overall  ~5 of 8 phases
+                              overall  ~6 of 8 phases
 ```
 
-The product is now usable as a project management tool rather than a kanban
-board: the same tasks can be read as a list, a table, a calendar, a Gantt
-timeline or a capacity grid. What remains is depth — custom fields,
-dependencies, automations — and the collaboration surface.
+Schedules have real dependencies and a critical path, tasks carry typed
+custom fields and tracked time, and rules act on changes without anyone
+asking. What remains is the collaboration surface and the enterprise
+layer.
 
 ---
 
@@ -231,14 +231,58 @@ path** on the timeline. Both need backend modelling that does not exist yet —
 drawing dependency arrows over data the server cannot express would be a mock,
 not a feature.
 
+## ✅ Phase A3 — Product engine
+
+The phase the views were waiting on.
+
+**Dependencies and the critical path.** A task can wait on another, and the
+timeline draws the arrows. Cycles are refused by a database trigger rather than
+by convention: a cycle makes the schedule unsolvable and the longest-path walk
+non-terminating, so it must never reach storage. The critical path is the
+heaviest chain by duration — the sequence where any slip moves the end date —
+computed by a memoised walk in Go rather than SQL, because the recursion has to
+carry accumulated weight and revisit nodes reachable by several routes.
+
+**Custom fields.** Typed per project or space, stored as JSONB with a GIN
+index. Definitions are relational, values are not: a row per value turns every
+task read into a join and a pivot. Writes merge rather than replace, so a
+client that knows about three fields cannot erase a fourth it has never heard
+of.
+
+**Time tracking.** A timer, manual entries, and tracked against estimated. One
+running timer per person is a partial unique index, not a check someone has to
+remember — a second concurrent timer would silently double-count the same hour.
+
+**Watchers.** Following a task without being responsible for it. Assignees are
+notified because it is their work; watchers because they asked.
+
+**Automations.** `trigger → condition → action`, with a deliberately small
+closed set of actions: a rule engine that runs arbitrary expressions is a
+scripting environment without any of the safeguards of one. Rules run
+synchronously after the change but never fail the request that triggered them.
+Every evaluation is recorded — including the skips, with the reason — because a
+rule that silently does not fire is otherwise undebuggable. A status-changing
+rule triggered by status changes is guarded against looping on itself.
+
+**Verified:** Go test packages grew from 6 to 8, covering the critical-path
+walk (weighting, diamonds, unknown blockers, projects with no dependencies) and
+the condition evaluator (including that an unimplemented operator fails
+closed). The smoke test grew from 107 to **138 assertions**, driving an
+automation end to end.
+
+**One bug the smoke test caught:** custom field values were written but never
+read back — the column was missing from the task SELECT, so the API accepted a
+write it could not return.
+
+**Deferred, with reason:** recurring tasks, templates, attachments (needs
+object storage, which is infrastructure rather than product), signed webhooks
+and public API tokens. Webhooks in particular need retry, backoff and a
+delivery log to be worth shipping — a phase of their own, not a corner of this
+one.
+
 ---
 
 ## What is left
-
-### ⬜ Phase A3 — Product engine
-Custom fields · task dependencies and critical path · time tracking ·
-recurring tasks · templates · attachments · watchers and mentions ·
-automation engine (trigger → condition → action) · signed webhooks · public API.
 
 ### ⬜ Phase B3 — Collaboration
 Rich-text editor and Docs · chat threads, reactions, mentions, attachments,
@@ -260,8 +304,8 @@ LGPD export and erasure · backup runbooks · HA.
 | M1 | Stack runs on Postgres; smoke test passes unchanged | ✅ |
 | M2 | Audit log covers mutations; RBAC matrix tested; sessions revocable | ✅ |
 | M3 | A 10k-task board renders under 100 ms p95 under load | ⬜ |
-| M4 | Gantt reorders dependencies and recomputes the critical path | 🚧 timeline ships; dependencies need A3 |
-| M5 | "Task overdue → notify assignee and change status" runs end to end | ⬜ |
+| M4 | Gantt reorders dependencies and recomputes the critical path | ✅ |
+| M5 | "Task overdue → notify assignee and change status" runs end to end | ✅ |
 
 ## Effort
 

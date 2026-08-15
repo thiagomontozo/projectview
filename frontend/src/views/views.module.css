@@ -519,6 +519,38 @@
   box-shadow: var(--shadow-md);
 }
 
+/* On the critical path: a slip here moves the project's end date. Marked with
+   an outline rather than a fill, so it composes with the done/overdue colours
+   instead of replacing them. */
+.timelineBarCritical {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+}
+
+/* One SVG layer over all the rows: per-row elements would be clipped by each
+   row's box, and an arrow has to be able to run from any row to any other. */
+.arrowLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 1;
+}
+
+.arrow {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.arrowCritical {
+  stroke: var(--danger);
+  stroke-width: 2;
+  opacity: 1;
+}
+
 /* A milestone is a task with no duration: a single point on the timeline. */
 .timelineMilestone {
   position: absolute;

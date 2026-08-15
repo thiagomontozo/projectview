@@ -151,12 +151,23 @@ jobs:
                    tasks task_assignees task_comments task_alerts_sent \
                    chat_channels chat_channel_members chat_messages notifications \
                    sessions audit_log spaces space_members folders \
+                   task_dependencies custom_field_definitions time_entries \
+                   task_watchers automations automation_runs \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
 
+          # The dependency graph must be acyclic by construction, not by
+          # convention: assert the guard trigger is actually installed.
+          psql "SELECT tgname FROM pg_trigger WHERE tgname = 'task_dependencies_acyclic'" | grep -q . \
+            || { echo "dependency cycle guard is missing" >&2; exit 1; }
+
+          # One running timer per person is a database invariant.
+          psql "SELECT indexname FROM pg_indexes WHERE indexname = 'time_entries_single_running_idx'" | grep -q . \
+            || { echo "single-running-timer index is missing" >&2; exit 1; }
+
           # Every migration must be recorded, so a restart does not re-run one.
-          for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy; do
+          for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy 0004_product_engine; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done

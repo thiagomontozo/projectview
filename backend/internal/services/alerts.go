@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/robfig/cron/v3"
 
 	"projectview/internal/config"
@@ -24,10 +26,11 @@ type AlertScheduler struct {
 	tasks    *repo.Tasks
 	cfg      *config.Config
 	notifier *Notifier
+	engine   *AutomationEngine
 }
 
-func NewAlertScheduler(tasks *repo.Tasks, cfg *config.Config, notifier *Notifier) *AlertScheduler {
-	return &AlertScheduler{tasks: tasks, cfg: cfg, notifier: notifier}
+func NewAlertScheduler(tasks *repo.Tasks, cfg *config.Config, notifier *Notifier, engine *AutomationEngine) *AlertScheduler {
+	return &AlertScheduler{tasks: tasks, cfg: cfg, notifier: notifier, engine: engine}
 }
 
 func (s *AlertScheduler) Start() {
@@ -62,6 +65,10 @@ func (s *AlertScheduler) RunDeadlineCheck(ctx context.Context) error {
 	}
 
 	sent := 0
+	// A task with several assignees produces several alerts; the automation
+	// attached to the deadline should still run once.
+	firedAutomation := map[uuid.UUID]bool{}
+
 	for _, alert := range pending {
 		alertType := models.AlertTypeDueSoon
 		notifType := models.NotifTaskDueSoon
@@ -95,6 +102,24 @@ func (s *AlertScheduler) RunDeadlineCheck(ctx context.Context) error {
 			logger.Error("failed to record alert for task %s: %v", alert.TaskID, err)
 		}
 		sent++
+
+		// A deadline is also an automation trigger: this is what lets a rule
+		// like "overdue -> raise priority and notify" exist. Fired once per
+		// task rather than once per assignee, since the rule acts on the task.
+		if s.engine != nil && !firedAutomation[alert.TaskID] {
+			firedAutomation[alert.TaskID] = true
+			trigger := TriggerTaskDueSoon
+			if alert.Overdue {
+				trigger = TriggerTaskOverdue
+			}
+			if task, err := s.tasks.ByID(ctx, alert.TaskID); err == nil {
+				s.engine.Run(ctx, Event{
+					Trigger:   trigger,
+					Task:      task,
+					ProjectID: alert.ProjectID,
+				})
+			}
+		}
 	}
 
 	if sent > 0 {

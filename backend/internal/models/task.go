@@ -38,10 +38,13 @@ type Task struct {
 	Order         float64         `json:"order"`
 	Tags          []string        `json:"tags"`
 	Checklist     []ChecklistItem `json:"checklist"`
-	Comments      []Comment       `json:"-"`
-	CreatedBy     *uuid.UUID      `json:"-"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	UpdatedAt     time.Time       `json:"updatedAt"`
+	// Values for the custom fields defined on the project or its space.
+	// Stored as JSONB so a task read stays a single row.
+	CustomFields map[string]any `json:"customFields"`
+	Comments     []Comment      `json:"-"`
+	CreatedBy    *uuid.UUID     `json:"-"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
 }
 
 const (

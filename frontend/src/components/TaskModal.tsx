@@ -8,7 +8,19 @@ import { Field, Input, Textarea } from '../ui/Field';
 import { Avatar, Badge } from '../ui/display';
 import { useToast } from '../ui/Toast';
 import { Check, ChevronDown } from '../ui/icons';
-import { useAddComment, useDeleteTask, useSaveTask, useTask } from '../lib/queries';
+import {
+  useAddComment,
+  useCustomFields,
+  useDeleteTask,
+  useLogTime,
+  useRunningTimer,
+  useSaveTask,
+  useSetTaskFields,
+  useStartTimer,
+  useStopTimer,
+  useTask,
+  useTaskTime
+} from '../lib/queries';
 import { errorMessage } from '../lib/api';
 import { toDateInput } from '../lib/format';
 import controls from '../ui/controls.module.css';
@@ -247,6 +259,10 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
           </section>
         )}
 
+        {isEdit && task && <CustomFieldsSection projectId={project.id} task={current ?? task} />}
+
+        {isEdit && task && <TimeSection task={current ?? task} />}
+
         {isEdit && (
           <section>
             <h4 className={controls.label}>{t('task.comments')}</h4>
@@ -302,6 +318,191 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
         }
       />
     </>
+  );
+}
+
+/**
+ * Values for the custom fields that apply to this project.
+ *
+ * Saved as one merge rather than field by field, so a client that knows about
+ * three fields cannot erase a fourth it has never heard of.
+ */
+function CustomFieldsSection({ projectId, task }: { projectId: string; task: Task }) {
+  const { t } = useTranslation();
+  const { data: definitions = [] } = useCustomFields(projectId);
+  const setFields = useSetTaskFields();
+  const [draft, setDraft] = useState<Record<string, unknown>>({});
+
+  if (definitions.length === 0) return null;
+
+  const stored = (task as Task & { customFields?: Record<string, unknown> }).customFields ?? {};
+  const valueOf = (key: string) => (key in draft ? draft[key] : stored[key]);
+
+  const commit = () => {
+    if (Object.keys(draft).length === 0) return;
+    setFields.mutate({ taskId: task.id, values: draft }, { onSuccess: () => setDraft({}) });
+  };
+
+  return (
+    <section>
+      <h4 className={controls.label}>{t('task.customFields')}</h4>
+      <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+        {definitions.map((definition) => {
+          const value = valueOf(definition.key);
+          const update = (next: unknown) => setDraft((current) => ({ ...current, [definition.key]: next }));
+
+          return (
+            <Field key={definition.id} label={definition.label} required={definition.required}>
+              {({ id }) => {
+                switch (definition.type) {
+                  case 'checkbox':
+                    return (
+                      <input
+                        id={id}
+                        type="checkbox"
+                        checked={Boolean(value)}
+                        onChange={(event) => update(event.target.checked)}
+                        onBlur={commit}
+                      />
+                    );
+                  case 'select':
+                    return (
+                      <SelectField
+                        id={id}
+                        value={String(value ?? '')}
+                        onChange={(next) => {
+                          update(next);
+                          setFields.mutate({ taskId: task.id, values: { [definition.key]: next } });
+                        }}
+                        options={definition.options.map((option) => ({ value: option, label: option }))}
+                      />
+                    );
+                  case 'number':
+                    return (
+                      <Input
+                        id={id}
+                        type="number"
+                        value={String(value ?? '')}
+                        onChange={(event) => update(Number(event.target.value))}
+                        onBlur={commit}
+                      />
+                    );
+                  case 'date':
+                    return (
+                      <Input
+                        id={id}
+                        type="date"
+                        value={String(value ?? '')}
+                        onChange={(event) => update(event.target.value)}
+                        onBlur={commit}
+                      />
+                    );
+                  default:
+                    return (
+                      <Input
+                        id={id}
+                        type={definition.type === 'email' ? 'email' : definition.type === 'url' ? 'url' : 'text'}
+                        value={String(value ?? '')}
+                        onChange={(event) => update(event.target.value)}
+                        onBlur={commit}
+                      />
+                    );
+                }
+              }}
+            </Field>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Timer, manual entries, and estimated against actual. */
+function TimeSection({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { data: entries = [] } = useTaskTime(task.id);
+  const { data: running } = useRunningTimer();
+  const startTimer = useStartTimer();
+  const stopTimer = useStopTimer();
+  const logTime = useLogTime();
+  const [minutes, setMinutes] = useState('');
+
+  const trackedSeconds = entries.reduce((total, entry) => total + entry.seconds, 0);
+  const trackedHours = trackedSeconds / 3600;
+  const runningHere = running?.taskId === task.id;
+  // Only meaningful once both numbers exist; an estimate of zero is "not
+  // estimated", not "estimated at nothing".
+  const overBudget = task.estimateHours > 0 && trackedHours > task.estimateHours;
+
+  return (
+    <section>
+      <h4 className={controls.label}>{t('task.time')}</h4>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        {runningHere ? (
+          <Button variant="danger" size="sm" loading={stopTimer.isPending} onClick={() => stopTimer.mutate()}>
+            {t('task.stopTimer')}
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={startTimer.isPending}
+            onClick={() =>
+              startTimer.mutate(task.id, {
+                onError: () => toast.error(t('task.timerAlreadyRunning'))
+              })
+            }
+          >
+            {t('task.startTimer')}
+          </Button>
+        )}
+
+        <Badge tone={overBudget ? 'danger' : 'neutral'}>
+          {t('task.trackedOfEstimate', {
+            tracked: trackedHours.toFixed(1),
+            estimate: task.estimateHours || 0
+          })}
+        </Badge>
+
+        <div style={{ display: 'flex', gap: 'var(--space-2)', marginLeft: 'auto' }}>
+          <Input
+            type="number"
+            min={1}
+            value={minutes}
+            onChange={(event) => setMinutes(event.target.value)}
+            placeholder={t('task.minutes')}
+            aria-label={t('task.logTime')}
+            style={{ width: 110 }}
+          />
+          <Button
+            size="sm"
+            disabled={!minutes || Number(minutes) <= 0}
+            loading={logTime.isPending}
+            onClick={() =>
+              logTime.mutate(
+                { taskId: task.id, minutes: Number(minutes) },
+                { onSuccess: () => setMinutes('') }
+              )
+            }
+          >
+            {t('task.logTime')}
+          </Button>
+        </div>
+      </div>
+
+      {entries.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 'var(--space-3) 0 0', display: 'grid', gap: 4 }}>
+          {entries.slice(0, 5).map((entry) => (
+            <li key={entry.id} style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+              {entry.user?.name ?? '—'} · {(entry.seconds / 3600).toFixed(2)}h
+              {!entry.endedAt && ` · ${t('task.running')}`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

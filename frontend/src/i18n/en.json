@@ -122,7 +122,20 @@
     "priorityLow": "Low",
     "priorityMedium": "Medium",
     "priorityHigh": "High",
-    "priorityUrgent": "Urgent"
+    "priorityUrgent": "Urgent",
+    "customFields": "Custom fields",
+    "time": "Time",
+    "startTimer": "Start timer",
+    "stopTimer": "Stop timer",
+    "logTime": "Log",
+    "minutes": "minutes",
+    "running": "running",
+    "timerAlreadyRunning": "You already have a timer running. Stop it first.",
+    "trackedOfEstimate": "{{tracked}}h of {{estimate}}h estimated",
+    "dependencies": "Depends on",
+    "blockedBy": "Blocked by {{title}}",
+    "watch": "Watch",
+    "unwatch": "Stop watching"
   },
   "myTasks": {
     "title": "My tasks",
@@ -261,6 +274,7 @@
     "workloadCell": "{{hours}}h of {{capacity}}h · {{count}} task(s)",
     "loadLight": "Has room",
     "loadFull": "Near capacity",
-    "loadOver": "Over {{capacity}}h/week"
+    "loadOver": "Over {{capacity}}h/week",
+    "criticalPath": "Critical path"
   }
 }

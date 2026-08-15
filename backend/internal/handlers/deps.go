@@ -12,6 +12,7 @@ import (
 	"projectview/internal/db"
 	"projectview/internal/obs"
 	"projectview/internal/repo"
+	"projectview/internal/services"
 	"projectview/internal/ws"
 )
 
@@ -33,6 +34,14 @@ type API struct {
 	Notifications *repo.Notifications
 	Dashboard     *repo.Dashboard
 	AuditLog      *repo.Audit
+	Dependencies  *repo.Dependencies
+	CustomFields  *repo.CustomFields
+	Time          *repo.TimeTracking
+	Watchers      *repo.Watchers
+	Automations   *repo.Automations
+	// Engine runs the automation rules. Set by main once the notifier exists,
+	// since the two depend on each other's construction order.
+	Engine *services.AutomationEngine
 }
 
 func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics) *API {
@@ -54,5 +63,10 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Notifications: repo.NewNotifications(store),
 		Dashboard:     repo.NewDashboard(store),
 		AuditLog:      auditRepo,
+		Dependencies:  repo.NewDependencies(store),
+		CustomFields:  repo.NewCustomFields(store),
+		Time:          repo.NewTimeTracking(store),
+		Watchers:      repo.NewWatchers(store),
+		Automations:   repo.NewAutomations(store),
 	}
 }
