@@ -1,173 +1,128 @@
-import { useEffect, useRef, useState } from 'react';
-import api from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import clsx from 'clsx';
+import { PageHeader } from '../app/AppShell';
+import { Avatar, Card, EmptyState, ErrorState } from '../ui/display';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Field';
+import { SkeletonList } from '../ui/Skeleton';
+import { Chat as ChatIcon } from '../ui/icons';
+import { useChannels, useMessages, usePostMessage } from '../lib/queries';
 import { useRealtime } from '../hooks/useRealtime';
-import type { ChatChannel, ChatMessage, PublicUser, RealtimeMessage } from '../types';
-
-function initials(name = ''): string {
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}
+import { formatRelative } from '../lib/format';
+import styles from './pages.module.css';
 
 export default function ChatPage() {
-  const { user } = useAuth();
-  const [channels, setChannels] = useState<ChatChannel[]>([]);
-  const [activeChannel, setActiveChannel] = useState<ChatChannel | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [text, setText] = useState('');
-  const [users, setUsers] = useState<PublicUser[]>([]);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const activeChannelRef = useRef<ChatChannel | null>(null);
-  activeChannelRef.current = activeChannel;
+  const { t, i18n } = useTranslation();
+  const { data: channels, isLoading: channelsLoading, isError, refetch } = useChannels();
+  const [activeId, setActiveId] = useState<string>();
+
+  const channelId = activeId ?? channels?.[0]?.id;
+  const { data: messages, isLoading: messagesLoading } = useMessages(channelId);
+  const postMessage = usePostMessage();
+
+  const [draft, setDraft] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Incoming messages arrive over the WebSocket; the hook invalidates the
+  // cached thread so the list refreshes without polling.
+  useRealtime();
 
   useEffect(() => {
-    api.get<ChatChannel[]>('/chat/channels').then((res) => {
-      setChannels(res.data);
-      setActiveChannel((current) => current || res.data[0] || null);
-    });
-    api.get<PublicUser[]>('/users').then((res) => setUsers(res.data));
-  }, []);
+    // Keep the newest message in view as the thread grows.
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [messages?.length, channelId]);
 
-  useEffect(() => {
-    if (!activeChannel) return;
-    api.get<ChatMessage[]>(`/chat/channels/${activeChannel.id}/messages`).then((res) => setMessages(res.data));
-  }, [activeChannel]);
-
-  // Messages are sent via REST (below) and received here in real time; the
-  // backend's WebSocket is a push-only channel (see hooks/useRealtime.ts).
-  // The server echoes a sender's own message back to them too (it pushes to
-  // every channel member, sender included), so de-dupe by id since the
-  // sender already appended it optimistically in send() below.
-  useRealtime((msg: RealtimeMessage) => {
-    if (msg.type === 'chat:message') {
-      const message = msg.payload as ChatMessage;
-      if (activeChannelRef.current && message.channel === activeChannelRef.current.id) {
-        setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
-      }
-    }
-  });
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  async function send() {
-    if (!text.trim() || !activeChannel) return;
-    const body = text;
-    setText('');
-    const res = await api.post<ChatMessage>(`/chat/channels/${activeChannel.id}/messages`, { body });
-    // The server also echoes this back over the WebSocket to other tabs;
-    // append locally right away so the sender sees it instantly.
-    setMessages((prev) => [...prev, res.data]);
+  function send(event: FormEvent) {
+    event.preventDefault();
+    const body = draft.trim();
+    if (!body || !channelId) return;
+    setDraft('');
+    postMessage.mutate({ channelId, body });
   }
 
-  async function startDM(otherUser: PublicUser) {
-    const res = await api.post<ChatChannel>('/chat/channels', { type: 'dm', memberIds: [otherUser.id] });
-    setChannels((prev) => {
-      const exists = prev.find((c) => c.id === res.data.id);
-      return exists ? prev : [res.data, ...prev];
-    });
-    setActiveChannel(res.data);
-  }
-
-  function channelLabel(c: ChatChannel): string {
-    if (c.name) return c.name;
-    if (c.type === 'dm') {
-      const other = c.members.find((m) => m.id !== user?.id);
-      return other ? other.name : 'Conversa';
-    }
-    return 'Canal';
-  }
+  const activeChannel = channels?.find((channel) => channel.id === channelId);
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Chat Interno</h1>
-      </div>
-      <div className="card" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', height: 'calc(100vh - 190px)', overflow: 'hidden' }}>
-        <div style={{ borderRight: '1px solid var(--grid)', overflowY: 'auto', padding: 10 }}>
-          <div className="label" style={{ padding: '4px 8px' }}>
-            Canais
-          </div>
-          {channels.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setActiveChannel(c)}
-              style={{
-                padding: '8px 10px',
-                borderRadius: 8,
-                fontSize: 13,
-                cursor: 'pointer',
-                background: activeChannel?.id === c.id ? '#eef4fc' : 'transparent',
-                marginBottom: 2
-              }}
-            >
-              {channelLabel(c)}
-            </div>
-          ))}
+    <>
+      <PageHeader title={t('chat.title')} />
 
-          <div className="label" style={{ padding: '14px 8px 4px' }}>
-            Iniciar conversa
-          </div>
-          {users
-            .filter((u) => u.id !== user?.id)
-            .map((u) => (
-              <div
-                key={u.id}
-                onClick={() => startDM(u)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}
-              >
-                <div className="avatar" style={{ width: 20, height: 20, fontSize: 10, background: u.avatarColor || '#2a78d6' }}>
-                  {initials(u.name)}
-                </div>
-                {u.name}
-              </div>
-            ))}
-        </div>
+      {isError && (
+        <Card>
+          <ErrorState title={t('errors.loadFailed')} onRetry={() => void refetch()} retryLabel={t('common.retry')} />
+        </Card>
+      )}
 
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--grid)', fontWeight: 600, fontSize: 14 }}>
-            {activeChannel ? channelLabel(activeChannel) : 'Selecione um canal'}
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-            {messages.map((m) => (
-              <div key={m.id} style={{ marginBottom: 12, display: 'flex', gap: 10 }}>
-                <div className="avatar" style={{ background: m.author?.avatarColor || '#2a78d6' }}>
-                  {initials(m.author?.name)}
+      {channelsLoading && <SkeletonList rows={4} height={48} label={t('common.loading')} />}
+
+      {channels && (
+        <div className={styles.chatLayout}>
+          <Card padded={false}>
+            <nav className={styles.channelList} aria-label={t('chat.channels')}>
+              {channels.map((channel) => (
+                <button
+                  key={channel.id}
+                  type="button"
+                  className={clsx(styles.channelItem, channel.id === channelId && styles.channelItemActive)}
+                  aria-current={channel.id === channelId ? 'true' : undefined}
+                  onClick={() => setActiveId(channel.id)}
+                >
+                  {channel.name || channel.members.map((m) => m.name).join(', ')}
+                </button>
+              ))}
+            </nav>
+          </Card>
+
+          <Card padded={false} className={styles.chatPane}>
+            {!channelId && (
+              <EmptyState icon={<ChatIcon size={22} />} title={t('chat.noChannel')} body={t('chat.noChannelBody')} />
+            )}
+
+            {channelId && (
+              <>
+                <div className={styles.messageList} ref={listRef}>
+                  {messagesLoading && <SkeletonList rows={4} height={44} label={t('common.loading')} />}
+
+                  {messages?.length === 0 && (
+                    <EmptyState icon={<ChatIcon size={22} />} title={t('chat.empty')} body={t('chat.emptyBody')} />
+                  )}
+
+                  {messages?.map((message) => (
+                    <article key={message.id} className={styles.message}>
+                      <Avatar
+                        name={message.author?.name ?? '?'}
+                        color={message.author?.avatarColor}
+                        size={30}
+                      />
+                      <div className={styles.messageBody}>
+                        <div>
+                          <span className={styles.messageAuthor}>{message.author?.name}</span>
+                          <time className={styles.messageTime} dateTime={message.createdAt}>
+                            {formatRelative(message.createdAt, i18n.language)}
+                          </time>
+                        </div>
+                        <p className={styles.messageText}>{message.body}</p>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-                <div>
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{m.author?.name}</strong>{' '}
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                      {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 14 }}>{m.body}</div>
-                </div>
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-          {activeChannel && (
-            <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--grid)' }}>
-              <input
-                className="input"
-                placeholder="Escreva uma mensagem..."
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && send()}
-              />
-              <button className="btn btn-primary" onClick={send}>
-                Enviar
-              </button>
-            </div>
-          )}
+
+                <form className={styles.composer} onSubmit={send}>
+                  <Input
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={t('chat.messagePlaceholder')}
+                    aria-label={t('chat.messagePlaceholder')}
+                  />
+                  <Button type="submit" variant="primary" disabled={!draft.trim()}>
+                    {t('chat.send')}
+                  </Button>
+                </form>
+              </>
+            )}
+          </Card>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }

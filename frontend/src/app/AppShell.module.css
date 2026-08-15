@@ -1,0 +1,312 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* --- Sidebar ---------------------------------------------------------------- */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--nav-bg);
+  border-right: 1px solid var(--nav-border);
+  overflow: hidden;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--nav-border);
+}
+
+.brandMark {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: var(--brand-500);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: var(--weight-bold);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.brandName {
+  color: var(--nav-text-active);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-md);
+}
+
+.nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navSection {
+  padding: var(--space-4) var(--space-3) var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--nav-text);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.navLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--nav-text-active);
+  text-decoration: none;
+}
+
+.navLinkActive {
+  background: var(--nav-surface-active);
+  color: var(--nav-text-active);
+}
+
+.navIcon {
+  display: flex;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.navLinkActive .navIcon {
+  opacity: 1;
+}
+
+.sidebarFooter {
+  padding: var(--space-3);
+  border-top: 1px solid var(--nav-border);
+  flex-shrink: 0;
+}
+
+/* --- Main area ---------------------------------------------------------------- */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--topbar-height);
+  padding: 0 var(--space-6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.searchTrigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  min-width: 260px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.searchTrigger:hover {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.searchTriggerKbd {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.topbarSpacer {
+  flex: 1;
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.userButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.userButton:hover {
+  background: var(--surface-hover);
+}
+
+.userName {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+.contentInner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+/* --- Page header ---------------------------------------------------------------- */
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: var(--text-2xl);
+}
+
+.pageDescription {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  margin-top: var(--space-1);
+}
+
+.pageActions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* --- Notification badge ---------------------------------------------------------- */
+.notificationDot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.notificationWrapper {
+  position: relative;
+  display: flex;
+}
+
+.notificationList {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.notificationItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.notificationItemUnread {
+  background: var(--accent-subtle);
+}
+
+.notificationTitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.notificationBody {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.notificationTime {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* --- Responsive -------------------------------------------------------------------
+   Below the breakpoint the sidebar becomes a slide-over; the grid collapses to
+   a single column so content keeps the full width. */
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--sidebar-width);
+    z-index: var(--z-modal);
+    transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--ease-out);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .sidebarScrim {
+    position: fixed;
+    inset: 0;
+    background: var(--overlay);
+    z-index: var(--z-overlay);
+  }
+
+  .content {
+    padding: var(--space-4);
+  }
+
+  .topbar {
+    padding: 0 var(--space-4);
+  }
+
+  .searchTrigger {
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+@media (min-width: 901px) {
+  .menuButton,
+  .sidebarScrim {
+    display: none;
+  }
+}

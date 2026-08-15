@@ -1,97 +1,135 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import api from '../api/client';
-import type { PublicUser, Team } from '../types';
+import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { PageHeader } from '../app/AppShell';
+import { Avatar, AvatarGroup, Card, EmptyState, ErrorState } from '../ui/display';
+import { Button } from '../ui/Button';
+import { Dialog } from '../ui/Dialog';
+import { Field, Input, Textarea } from '../ui/Field';
+import { SkeletonList } from '../ui/Skeleton';
+import { useToast } from '../ui/Toast';
+import { Plus, Users } from '../ui/icons';
+import { useCreateTeam, useTeams } from '../lib/queries';
+import { errorMessage } from '../lib/api';
+import styles from './pages.module.css';
 
 export default function TeamsPage() {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [users, setUsers] = useState<PublicUser[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', memberIds: [] as string[] });
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { data: teams, isLoading, isError, refetch } = useTeams();
+  const createTeam = useCreateTeam();
 
-  function load() {
-    api.get<Team[]>('/teams').then((res) => setTeams(res.data));
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', description: '' });
+  const [error, setError] = useState('');
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setError('');
+    createTeam.mutate(form, {
+      onSuccess: () => {
+        toast.success(t('teams.created'));
+        setForm({ name: '', description: '' });
+        setOpen(false);
+      },
+      onError: (err) => setError(errorMessage(err, t('errors.genericBody')))
+    });
   }
 
-  useEffect(() => {
-    load();
-    api.get<PublicUser[]>('/users').then((res) => setUsers(res.data));
-  }, []);
-
-  async function createTeam(e: FormEvent) {
-    e.preventDefault();
-    await api.post('/teams', form);
-    setForm({ name: '', description: '', memberIds: [] });
-    setShowForm(false);
-    load();
-  }
+  const newButton = (
+    <Button variant="primary" onClick={() => setOpen(true)}>
+      <Plus size={16} />
+      {t('teams.new')}
+    </Button>
+  );
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Equipes</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          + Nova equipe
-        </button>
-      </div>
+    <>
+      <PageHeader title={t('teams.title')} actions={newButton} />
 
-      {showForm && (
-        <form className="card" style={{ padding: 18, marginBottom: 20 }} onSubmit={createTeam}>
-          <div className="form-row">
-            <label className="label">Nome</label>
-            <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          </div>
-          <div className="form-row">
-            <label className="label">Descrição</label>
-            <textarea className="textarea" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          </div>
-          <div className="form-row">
-            <label className="label">Membros</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {users.map((u) => (
-                <button
-                  type="button"
-                  key={u.id}
-                  className="btn btn-sm"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      memberIds: f.memberIds.includes(u.id) ? f.memberIds.filter((id) => id !== u.id) : [...f.memberIds, u.id]
-                    }))
-                  }
-                  style={{
-                    background: form.memberIds.includes(u.id) ? '#eef4fc' : undefined,
-                    borderColor: form.memberIds.includes(u.id) ? '#2a78d6' : undefined
-                  }}
-                >
-                  {u.name}
-                </button>
-              ))}
-            </div>
-          </div>
-          <button className="btn btn-primary" type="submit">
-            Criar
-          </button>
-        </form>
+      {isLoading && <SkeletonList rows={3} height={130} label={t('common.loading')} />}
+
+      {isError && (
+        <Card>
+          <ErrorState title={t('errors.loadFailed')} onRetry={() => void refetch()} retryLabel={t('common.retry')} />
+        </Card>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-        {teams.map((t) => (
-          <div key={t.id} className="card" style={{ padding: 18 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span style={{ width: 12, height: 12, borderRadius: '50%', background: t.color }} />
-              <strong>{t.name}</strong>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t.description}</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-              {(t.members || []).map((m) => (
-                <span key={m.id} className="badge">
-                  {m.name}
+      {teams?.length === 0 && (
+        <Card>
+          <EmptyState icon={<Users size={22} />} title={t('teams.empty')} body={t('teams.emptyBody')} action={newButton} />
+        </Card>
+      )}
+
+      {teams && teams.length > 0 && (
+        <ul className={`${styles.grid} ${styles.gridCards}`} style={{ listStyle: 'none', padding: 0 }}>
+          {teams.map((team) => (
+            <Card as="li" key={team.id}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                <span
+                  style={{ width: 10, height: 10, borderRadius: '50%', background: team.color, flexShrink: 0 }}
+                  aria-hidden="true"
+                />
+                <span className={styles.projectName}>{team.name}</span>
+              </div>
+              {team.description && <p className={styles.muted}>{team.description}</p>}
+              <div className={styles.projectMeta}>
+                <AvatarGroup>
+                  {(team.members ?? []).slice(0, 5).map((member) => (
+                    <Avatar key={member.id} name={member.name} color={member.avatarColor} size={24} />
+                  ))}
+                </AvatarGroup>
+                <span className={styles.subtle}>
+                  {t('projects.memberCount', { count: team.members?.length ?? 0 })}
                 </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+              </div>
+            </Card>
+          ))}
+        </ul>
+      )}
+
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={t('teams.new')}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="primary" type="submit" form="new-team" loading={createTeam.isPending}>
+              {t('common.create')}
+            </Button>
+          </>
+        }
+      >
+        <form id="new-team" onSubmit={submit} style={{ display: 'grid', gap: 'var(--space-4)' }}>
+          <Field label={t('teams.name')} required>
+            {({ id }) => (
+              <Input
+                id={id}
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                required
+                autoFocus
+              />
+            )}
+          </Field>
+          <Field label={t('teams.description')}>
+            {({ id }) => (
+              <Textarea
+                id={id}
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            )}
+          </Field>
+          {error && (
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 'var(--text-sm)' }}>
+              {error}
+            </p>
+          )}
+        </form>
+      </Dialog>
+    </>
   );
 }

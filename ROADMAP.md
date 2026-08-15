@@ -13,17 +13,17 @@ Phase 0  Security containment        ██████████████�
 Phase A1 PostgreSQL foundation       ████████████████████  100%   ✅
 Phase A2 Domain, security, ops       ████████████████░░░░   80%   ✅
 Phase A3 Product engine              ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
-Phase B1 UI foundation               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase B1 UI foundation               ████████████████████  100%   ✅
 Phase B2 Views                       ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase B3 Collaboration               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
                                      ─────────────────────
-                              overall  ~3 of 8 phases
+                              overall  ~4 of 8 phases
 ```
 
-The backend is now a platform: hierarchical, auditable, revocable, searchable
-and observable. What remains is mostly **product surface** — the features and
-the interface that sit on top of it.
+The backend is a platform: hierarchical, auditable, revocable, searchable and
+observable. The frontend now has a foundation to match. What remains is
+**product surface** — the views and the features that sit on top.
 
 ---
 
@@ -138,6 +138,55 @@ proof that a revoked token stops working while still cryptographically valid.
 transactional outbox. Both are most valuable once A3 introduces webhooks and
 automations that need them; building them now would be speculative.
 
+## ✅ Phase B1 — UI foundation
+
+Every inline style is gone. The frontend went from one CSS file and
+`useEffect`+`fetch` on each page to a real architecture.
+
+**Design system.** Two token layers — a primitive palette, then semantic tokens
+that components actually use — so re-theming touches one file instead of every
+component. Light, dark and **system** themes, the last setting no attribute at
+all so the OS keeps deciding as the day goes on.
+
+**Data layer.** TanStack Query replaces per-page fetching: shared cache, request
+deduplication, retry that skips 4xx (a definitive answer is not worth
+repeating), and optimistic kanban moves that roll back if the server refuses.
+
+**Silent session refresh.** A 401 now exchanges the refresh cookie for a new
+token and replays the request. Concurrent 401s share one in-flight refresh —
+without that, six parallel requests would trigger six refreshes and, because
+refresh tokens rotate on use, five would present a consumed token and sign the
+user out.
+
+**Accessibility.** Radix primitives supply focus trapping, roving focus and
+keyboard behaviour. On top: a skip link, landmarks, `:focus-visible` rings that
+appear for keyboards but not clicks, honoured `prefers-reduced-motion`, labels
+wired to controls with `aria-describedby`, and errors in `role="alert"` so they
+are announced rather than merely shown.
+
+**i18n.** pt-BR and en, browser-detected, with `<html lang>` kept in sync.
+
+**Command palette.** `Ctrl/Cmd+K`, searching tasks through the server's
+full-text index rather than filtering an already-loaded list — the difference
+between a search and a filter.
+
+**A2's work made visible.** Spaces now have a screen showing the hierarchy and
+your role on it; Settings lists active sessions and lets you end one. Both were
+capabilities that existed only in the API.
+
+**Verified:** 18 frontend tests (Vitest + Testing Library) covering the
+formatting rules and the accessibility contracts of the primitives, plus a
+clean type-check and production build. The 107-assertion backend smoke test
+still passes against the rebuilt stack.
+
+**Two real bugs found by the tests:** the avatar fallback rendered blank for a
+frame because a `delayMs` of zero still schedules a timer, and `Card` was typed
+to `HTMLDivElement` while being rendered as `li`.
+
+**Deferred:** Playwright browser tests. They belong with B2, when there are
+views worth driving end to end; today they would mostly re-test what the smoke
+test already covers.
+
 ---
 
 ## What is left
@@ -146,11 +195,6 @@ automations that need them; building them now would be speculative.
 Custom fields · task dependencies and critical path · time tracking ·
 recurring tasks · templates · attachments · watchers and mentions ·
 automation engine (trigger → condition → action) · signed webhooks · public API.
-
-### ⬜ Phase B1 — UI foundation
-Design tokens and a component library on Radix · TanStack Query replacing the
-per-page `useEffect`+`fetch` · error boundaries and skeletons · i18n ·
-WCAG AA · command palette · Vitest and Playwright.
 
 ### ⬜ Phase B2 — Views
 List, Table (inline editing), Calendar, Gantt (drag, dependencies, milestones,
@@ -182,10 +226,10 @@ LGPD export and erasure · backup runbooks · HA.
 
 ## Effort
 
-Phases 0, A1 and A2 are done. The remaining five phases are roughly **22
-person-weeks**, compressible to about 13–15 calendar weeks with the platform
+Phases 0, A1, A2 and B1 are done. The remaining four are roughly **19
+person-weeks**, compressible to about 11–13 calendar weeks with the platform
 and product tracks running in parallel.
 
-The centre of gravity has shifted: what is left is mostly frontend. B1 and B2
-together are the largest remaining block, and they are what will make the
-hierarchy, search and permissions built in A2 visible to a user.
+**B2 is now the highest-value next step.** The foundation exists and the data
+is there; what is missing is the views — Gantt, Calendar, Table, Timeline,
+Workload — that turn a kanban board into a project management tool.

@@ -1,75 +1,70 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import api from '../api/client';
-import { priorityColor } from '../styles/theme.ts';
-import type { ProjectRefLite, Task } from '../types';
+import { useTranslation } from 'react-i18next';
+import { PageHeader } from '../app/AppShell';
+import { Badge, Card, EmptyState, ErrorState } from '../ui/display';
+import { SkeletonList } from '../ui/Skeleton';
+import { CheckSquare } from '../ui/icons';
+import { useMyTasks } from '../lib/queries';
+import { formatDate, isOverdue, priorityTone } from '../lib/format';
+import styles from './pages.module.css';
 
 export default function MyTasksPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-
-  useEffect(() => {
-    api.get<Task[]>('/tasks/mine').then((res) => setTasks(res.data));
-  }, []);
+  const { t } = useTranslation();
+  const { data: tasks, isLoading, isError, refetch } = useMyTasks();
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Minhas Tarefas</h1>
-      </div>
-      <div className="card" style={{ padding: 0 }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Tarefa</th>
-              <th>Projeto</th>
-              <th>Status</th>
-              <th>Prioridade</th>
-              <th>Prazo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((t) => {
-              const project = typeof t.project === 'object' ? (t.project as ProjectRefLite) : null;
+    <>
+      <PageHeader title={t('myTasks.title')} />
+
+      {isLoading && <SkeletonList rows={5} height={52} label={t('common.loading')} />}
+
+      {isError && (
+        <Card>
+          <ErrorState title={t('errors.loadFailed')} onRetry={() => void refetch()} retryLabel={t('common.retry')} />
+        </Card>
+      )}
+
+      {tasks?.length === 0 && (
+        <Card>
+          <EmptyState icon={<CheckSquare size={22} />} title={t('myTasks.empty')} body={t('myTasks.emptyBody')} />
+        </Card>
+      )}
+
+      {tasks && tasks.length > 0 && (
+        <Card padded={false}>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {tasks.map((task) => {
+              const project = typeof task.project === 'string' ? undefined : task.project;
+              const overdue = isOverdue(task.dueDate, task.status);
               return (
-                <tr key={t.id}>
-                  <td>{t.title}</td>
-                  <td>
+                <li key={task.id} className={styles.taskRow}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className={styles.taskTitle}>{task.title}</div>
                     {project && (
-                      <Link to={`/projects/${project.id}`} className="badge">
-                        {project.key}
+                      <Link to={`/projects/${project.id}`} className={styles.subtle}>
+                        {project.name}
                       </Link>
                     )}
-                  </td>
-                  <td>
-                    <span className="badge">{t.status}</span>
-                  </td>
-                  <td>
-                    <span className="badge" style={{ color: priorityColor[t.priority], background: `${priorityColor[t.priority]}22` }}>
-                      {t.priority}
-                    </span>
-                  </td>
-                  <td>
-                    {t.dueDate ? (
-                      <span style={{ color: new Date(t.dueDate) < new Date() && t.status !== 'done' ? '#d03b3b' : undefined }}>
-                        {new Date(t.dueDate).toLocaleDateString('pt-BR')}
-                      </span>
-                    ) : (
-                      '—'
+                  </div>
+                  <div className={styles.taskMeta}>
+                    <Badge tone={priorityTone(task.priority)}>{t(`task.priority${capitalize(task.priority)}`)}</Badge>
+                    {task.dueDate && (
+                      <Badge tone={overdue ? 'danger' : 'neutral'}>
+                        {overdue ? `${t('task.overdue')} · ` : ''}
+                        {formatDate(task.dueDate)}
+                      </Badge>
                     )}
-                  </td>
-                </tr>
+                  </div>
+                </li>
               );
             })}
-            {tasks.length === 0 && (
-              <tr>
-                <td colSpan={5} style={{ color: 'var(--text-secondary)' }}>
-                  Nenhuma tarefa atribuída a você ainda.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </ul>
+        </Card>
+      )}
+    </>
   );
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

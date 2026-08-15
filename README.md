@@ -87,10 +87,25 @@ Internet
   [robfig/cron](https://github.com/robfig/cron) for deadline alerts, and a
   small WebSocket hub ([gorilla/websocket](https://github.com/gorilla/websocket))
   for chat and real-time notifications.
-- **Frontend (React + TypeScript)** — Vite, React Router, Recharts for the
-  charts, `@dnd-kit` for the draggable dashboard and kanban board, and a
-  native WebSocket client (no extra library) for incoming messages and
-  notifications — all writes go through the REST API.
+- **Frontend (React + TypeScript)** — Vite, React Router with route-level code
+  splitting, [TanStack Query](https://tanstack.com/query) for the data layer,
+  [Radix](https://www.radix-ui.com/) primitives under a token-based design
+  system, `i18next` for pt-BR/en, Recharts for the charts, `@dnd-kit` for the
+  draggable dashboard and kanban board, and a native WebSocket client for
+  incoming messages and notifications — all writes go through the REST API.
+
+### Frontend architecture
+
+| Concern | Approach |
+|---|---|
+| Design system | Two-layer CSS tokens (primitive palette → semantic tokens) in [tokens.css](frontend/src/styles/tokens.css); components reference only the semantic layer, so re-theming touches one file |
+| Theme | Light / dark / **system**, the last setting no attribute at all so the OS decides and keeps deciding |
+| Data | TanStack Query with centralised query keys, retry that skips 4xx, and optimistic kanban moves that roll back on failure |
+| Sessions | Silent token refresh on 401 with a shared in-flight promise, so six concurrent requests trigger one refresh rather than six — which would otherwise sign the user out, since refresh tokens rotate on use |
+| Accessibility | Radix primitives for focus trapping and keyboard behaviour, skip link, landmarks, `:focus-visible` rings, `prefers-reduced-motion`, labelled controls with `role="alert"` errors |
+| i18n | Bundled pt-BR and en dictionaries, browser detection, `<html lang>` kept in sync |
+| Keyboard | `Ctrl/Cmd+K` command palette that searches tasks through the server's full-text index, not a client-side filter |
+| States | Skeletons shaped like the content, distinct empty vs. error states, and an error boundary so one broken component cannot blank the app |
 - **Database** — PostgreSQL 16. The address is fully configurable through
   `DATABASE_URL` and can point at the bundled container or any other instance
   (RDS, Cloud SQL, on-prem, …). On first run the backend applies the migrations
@@ -157,6 +172,18 @@ host trusts the interceptor's root certificate but the build containers do
 not. Drop that root certificate into [`ca/`](ca/README.md) as a `.crt` file and
 rebuild; both build stages pick it up automatically. No certificate is needed
 on an ordinary network.
+
+The same applies to any *ad-hoc* container that reaches the network — running
+npm by hand to regenerate `package-lock.json`, for instance. Without the
+certificate npm does not fail fast; it retries with backoff and appears to
+hang. Pass the CA explicitly:
+
+```bash
+docker run --rm -v "$PWD/frontend:/app" -w /app \
+  -v "$PWD/ca/your-root.crt:/tmp/ca.crt" \
+  -e NODE_EXTRA_CA_CERTS=/tmp/ca.crt \
+  node:20-alpine npm install --package-lock-only
+```
 
 ## HTTPS and the edge proxy
 

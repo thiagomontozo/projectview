@@ -1,51 +1,47 @@
-import { useEffect, useState } from 'react';
-import api from '../api/client';
-import StatusPie from '../components/charts/StatusPie.tsx';
-import WorkloadBar from '../components/charts/WorkloadBar.tsx';
-import CompletionTrend from '../components/charts/CompletionTrend.tsx';
-import ProjectProgress from '../components/charts/ProjectProgress.tsx';
-import type { CompletionTrendRow, ProjectProgressRow, StatusBreakdownRow, WorkloadChartRow } from '../types';
+import { useTranslation } from 'react-i18next';
+import { PageHeader } from '../app/AppShell';
+import { Card } from '../ui/display';
+import { Skeleton } from '../ui/Skeleton';
+import StatusPie from '../components/charts/StatusPie';
+import WorkloadBar from '../components/charts/WorkloadBar';
+import ProjectProgress from '../components/charts/ProjectProgress';
+import CompletionTrend from '../components/charts/CompletionTrend';
+import { useCompletionTrend, useProjectProgress, useStatusBreakdown, useWorkloadChart } from '../lib/queries';
+import styles from './pages.module.css';
 
 export default function ReportsPage() {
-  const [statusBreakdown, setStatusBreakdown] = useState<StatusBreakdownRow[]>([]);
-  const [workload, setWorkload] = useState<WorkloadChartRow[]>([]);
-  const [trend, setTrend] = useState<CompletionTrendRow[]>([]);
-  const [progress, setProgress] = useState<ProjectProgressRow[]>([]);
+  const { t } = useTranslation();
 
-  useEffect(() => {
-    api.get<StatusBreakdownRow[]>('/dashboard/status-breakdown').then((res) => setStatusBreakdown(res.data));
-    api.get<WorkloadChartRow[]>('/dashboard/workload-chart').then((res) => setWorkload(res.data));
-    api.get<CompletionTrendRow[]>('/dashboard/completion-trend').then((res) => setTrend(res.data));
-    api.get<ProjectProgressRow[]>('/dashboard/project-progress').then((res) => setProgress(res.data));
-  }, []);
+  const statusBreakdown = useStatusBreakdown();
+  const workloadChart = useWorkloadChart();
+  const projectProgress = useProjectProgress();
+  const completionTrend = useCompletionTrend();
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Relatórios</h1>
-      </div>
+    <>
+      <PageHeader title={t('reports.title')} />
 
-      <div className="grid-2">
-        <div className="card chart-card">
-          <h3>Distribuição de tarefas por status</h3>
-          <StatusPie data={statusBreakdown} />
-        </div>
-        <div className="card chart-card">
-          <h3>Carga de trabalho por recurso (tarefas abertas)</h3>
-          <WorkloadBar data={workload} />
-        </div>
-      </div>
+      <div className={`${styles.grid} ${styles.gridTwo}`}>
+        <Card>
+          <h2 className={styles.chartTitle}>{t('dashboard.tasksByStatus')}</h2>
+          {statusBreakdown.isLoading ? <Skeleton height={260} /> : <StatusPie data={statusBreakdown.data ?? []} />}
+        </Card>
 
-      <div className="grid-2">
-        <div className="card chart-card">
-          <h3>Tarefas concluídas (últimos 30 dias)</h3>
-          <CompletionTrend data={trend} />
-        </div>
-        <div className="card chart-card">
-          <h3>Progresso por projeto</h3>
-          <ProjectProgress data={progress} />
-        </div>
+        <Card>
+          <h2 className={styles.chartTitle}>{t('dashboard.workload')}</h2>
+          {workloadChart.isLoading ? <Skeleton height={260} /> : <WorkloadBar data={workloadChart.data ?? []} />}
+        </Card>
+
+        <Card>
+          <h2 className={styles.chartTitle}>{t('dashboard.projectProgress')}</h2>
+          {projectProgress.isLoading ? <Skeleton height={260} /> : <ProjectProgress data={projectProgress.data ?? []} />}
+        </Card>
+
+        <Card>
+          <h2 className={styles.chartTitle}>{t('dashboard.completions')}</h2>
+          {completionTrend.isLoading ? <Skeleton height={260} /> : <CompletionTrend data={completionTrend.data ?? []} />}
+        </Card>
       </div>
-    </div>
+    </>
   );
 }

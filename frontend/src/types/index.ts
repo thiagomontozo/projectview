@@ -1,10 +1,12 @@
 // Shared types mirroring the Go backend's JSON responses
-// (see backend/internal/models and backend/internal/handlers).
+// (see backend/internal/models, internal/repo and internal/handlers).
 
 export type Role = 'admin' | 'manager' | 'member';
 export type AuthSource = 'local' | 'ad';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export type ProjectStatusState = 'planning' | 'active' | 'on_hold' | 'completed' | 'archived';
+/** Role held on a Space; grants flow down to everything inside it. */
+export type SpaceRole = 'owner' | 'admin' | 'member' | 'guest';
 
 export interface PublicUser {
   id: string;
@@ -27,6 +29,17 @@ export interface User extends PublicUser {
   updatedAt: string;
 }
 
+/** A live login. Listed so a person can see where they are signed in. */
+export interface Session {
+  id: string;
+  userAgent?: string;
+  ip?: string;
+  current: boolean;
+  lastUsedAt?: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -34,6 +47,38 @@ export interface Team {
   color: string;
   members: PublicUser[];
   leadId?: PublicUser;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SpaceMember {
+  user: PublicUser;
+  role: SpaceRole;
+}
+
+/** Top of the hierarchy: Space -> Folder -> List(project) -> Task. */
+export interface Space {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  isPrivate: boolean;
+  position: number;
+  archived: boolean;
+  members: SpaceMember[];
+  /** The caller's effective role, so the UI can hide what would be refused. */
+  yourRole?: SpaceRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Folder {
+  id: string;
+  spaceId: string;
+  name: string;
+  color: string;
+  position: number;
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +103,10 @@ export interface Project {
   description?: string;
   color: string;
   status: ProjectStatusState;
+  spaceId?: string;
+  folderId?: string;
+  position: number;
+  archived: boolean;
   team?: TeamRef;
   members: PublicUser[];
   owner?: PublicUser;
@@ -126,8 +175,9 @@ export interface ChatChannel {
 export interface ChatMessage {
   id: string;
   channel: string;
-  author: PublicUser;
+  author?: PublicUser;
   body: string;
+  readBy: string[];
   createdAt: string;
 }
 
@@ -187,6 +237,29 @@ export interface ProjectProgressRow {
 export interface CompletionTrendRow {
   date: string;
   count: number;
+}
+
+/** Cursor-paginated envelope returned by the searchable listings. */
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+  hasMore: boolean;
+  total?: number;
+}
+
+/** One entry of the append-only audit trail. */
+export interface AuditEntry {
+  id: number;
+  occurredAt: string;
+  actorId?: string;
+  actor: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  changes?: Record<string, unknown>;
+  ip?: string;
+  requestId?: string;
+  status: number;
 }
 
 // Envelope pushed by the backend over the WebSocket ("/ws?token=...").

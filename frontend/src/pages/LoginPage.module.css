@@ -1,0 +1,77 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: radial-gradient(
+      1200px 600px at 20% -10%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent
+    ),
+    var(--bg);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--space-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.brandMark {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  display: grid;
+  place-items: center;
+  font-weight: var(--weight-bold);
+  flex-shrink: 0;
+}
+
+.brandName {
+  font-size: var(--text-lg);
+  margin: 0;
+}
+
+.brandTagline {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.welcome {
+  color: var(--text-secondary);
+  margin-bottom: var(--space-5);
+}
+
+.notice {
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--warning-subtle);
+  color: var(--warning);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
