@@ -3,10 +3,10 @@ package handlers
 import (
 	"net/http"
 
-	"golang.org/x/crypto/bcrypt"
-
+	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
+	"projectview/internal/logger"
 	"projectview/internal/models"
 	"projectview/internal/repo"
 )
@@ -89,6 +89,29 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deactivating an account must end its live sessions at once. Without
+	// this the user keeps working until their token happens to expire, which
+	// is exactly the window an offboarding is meant to close.
+	if patch.Active != nil && !*patch.Active {
+		if n, err := a.Sessions.RevokeAllForUser(r.Context(), id); err == nil && n > 0 {
+			logger.Info("Revoked %d session(s) for deactivated user %s", n, id)
+		}
+		a.Audit.Record(r, requester, audit.Event{
+			Action: audit.ActionUserDeactivated, ResourceType: "user", ResourceID: id.String(),
+			Status: http.StatusOK,
+		})
+	}
+	if patch.Role != nil {
+		a.Audit.Record(r, requester, audit.Event{
+			Action: audit.ActionRoleChanged, ResourceType: "user", ResourceID: id.String(),
+			Changes: map[string]any{"role": *patch.Role}, Status: http.StatusOK,
+		})
+	}
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionUserUpdated, ResourceType: "user", ResourceID: id.String(),
+		Changes: map[string]any{"fields": changedFields(req)}, Status: http.StatusOK,
+	})
+
 	user, err := a.Users.ByID(r.Context(), id)
 	if err != nil {
 		respondRepoError(w, err, "User not found.")
@@ -147,13 +170,13 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 				"This account signs in through Active Directory; its password is managed there.")
 			return
 		}
-		if bcrypt.CompareHashAndPassword([]byte(requester.PasswordHash), []byte(req.CurrentPassword)) != nil {
+		if ok, _ := auth.VerifyPassword(requester.PasswordHash, req.CurrentPassword); !ok {
 			httpx.Error(w, http.StatusUnauthorized, "Current password is incorrect.")
 			return
 		}
 	}
 
-	hash, err := hashPassword(req.Password)
+	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -162,7 +185,53 @@ func (a *API) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		respondRepoError(w, err, "User not found.")
 		return
 	}
+
+	// A password change ends the account's other sessions. If the change was
+	// prompted by a suspected compromise, leaving the attacker's session alive
+	// would defeat the point. Someone changing their own password keeps the
+	// browser they did it from; an admin reset signs the user out everywhere.
+	var revoked int64
+	if currentSession, ok := auth.CurrentSession(r); ok && isSelf {
+		revoked, _ = a.Sessions.RevokeAllForUserExcept(r.Context(), id, currentSession)
+	} else {
+		revoked, _ = a.Sessions.RevokeAllForUser(r.Context(), id)
+	}
+	if revoked > 0 {
+		logger.Info("Revoked %d session(s) after password change for %s", revoked, id)
+	}
+
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionPasswordChanged, ResourceType: "user", ResourceID: id.String(),
+		Changes: map[string]any{"self": isSelf}, Status: http.StatusOK,
+	})
+
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// changedFields lists which profile fields an update touched, for the audit
+// trail. Values are deliberately omitted here - the field names are enough to
+// answer "what changed", without copying personal data into the trail.
+func changedFields(req updateUserRequest) []string {
+	fields := []string{}
+	if req.Name != nil {
+		fields = append(fields, "name")
+	}
+	if req.Title != nil {
+		fields = append(fields, "title")
+	}
+	if req.AvatarColor != nil {
+		fields = append(fields, "avatarColor")
+	}
+	if req.NotifyByEmail != nil {
+		fields = append(fields, "notifyByEmail")
+	}
+	if req.Role != nil {
+		fields = append(fields, "role")
+	}
+	if req.Active != nil {
+		fields = append(fields, "active")
+	}
+	return fields
 }
 
 type workloadRow struct {
@@ -191,9 +260,4 @@ func (a *API) Workload(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.JSON(w, http.StatusOK, out)
-}
-
-func hashPassword(pw string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
-	return string(hash), err
 }

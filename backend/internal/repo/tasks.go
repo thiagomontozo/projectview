@@ -165,6 +165,74 @@ func (r *Tasks) ByProject(ctx context.Context, projectID uuid.UUID) ([]models.Ta
 		 ORDER BY t.status, t.position, t.created_at`, projectID)
 }
 
+// TaskQuery describes a filtered, searchable, paginated task listing.
+type TaskQuery struct {
+	ProjectID  *uuid.UUID
+	AssigneeID *uuid.UUID
+	Status     string
+	Priority   string
+	ParentOnly bool // exclude sub-tasks
+	Overdue    bool
+	Search     string
+	// Cursor anchors on (created_at, id) of the last row of the previous page.
+	CursorTime *time.Time
+	CursorID   *uuid.UUID
+	Limit      int
+}
+
+// Search returns a page of tasks matching the query, newest first.
+//
+// One row beyond the limit is fetched so the caller can tell whether more
+// exist without a second COUNT.
+func (r *Tasks) Search(ctx context.Context, q TaskQuery) ([]models.Task, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	// websearch_to_tsquery accepts what a person would actually type -
+	// quoted phrases, "or", leading "-" to exclude - and never errors on
+	// malformed input, unlike to_tsquery.
+	return r.collect(ctx, `
+		SELECT `+taskColumns+`
+		  FROM tasks t
+		 WHERE ($1::uuid IS NULL OR t.project_id = $1)
+		   AND ($2::uuid IS NULL OR EXISTS (
+		         SELECT 1 FROM task_assignees ta
+		          WHERE ta.task_id = t.id AND ta.user_id = $2))
+		   AND ($3::text = '' OR t.status = $3)
+		   AND ($4::text = '' OR t.priority = $4)
+		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
+		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
+		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))
+		   AND ($8::timestamptz IS NULL
+		        OR t.created_at < $8
+		        OR (t.created_at = $8 AND t.id < $9::uuid))
+		 ORDER BY t.created_at DESC, t.id DESC
+		 LIMIT $10`,
+		q.ProjectID, q.AssigneeID, q.Status, q.Priority, q.ParentOnly, q.Overdue,
+		q.Search, q.CursorTime, q.CursorID, limit+1)
+}
+
+// CountMatching reports how many tasks match, ignoring pagination.
+func (r *Tasks) CountMatching(ctx context.Context, q TaskQuery) (int64, error) {
+	var n int64
+	err := r.store.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM tasks t
+		 WHERE ($1::uuid IS NULL OR t.project_id = $1)
+		   AND ($2::uuid IS NULL OR EXISTS (
+		         SELECT 1 FROM task_assignees ta
+		          WHERE ta.task_id = t.id AND ta.user_id = $2))
+		   AND ($3::text = '' OR t.status = $3)
+		   AND ($4::text = '' OR t.priority = $4)
+		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
+		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
+		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))`,
+		q.ProjectID, q.AssigneeID, q.Status, q.Priority, q.ParentOnly, q.Overdue, q.Search).Scan(&n)
+	return n, err
+}
+
 func (r *Tasks) AssignedTo(ctx context.Context, userID uuid.UUID) ([]models.Task, error) {
 	return r.collect(ctx, `SELECT `+taskColumns+`
 		  FROM tasks t

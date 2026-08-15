@@ -18,8 +18,13 @@ type DatabaseConfig struct {
 }
 
 type JWTConfig struct {
-	Secret         string
+	Secret string
+	// ExpiresInHours is the access-token lifetime. It is deliberately short:
+	// revocation is checked against the session record on every request, and a
+	// short window bounds the damage from a leaked token even so.
 	ExpiresInHours int
+	// RefreshDays is how long a login survives without re-entering credentials.
+	RefreshDays int
 }
 
 type ADConfig struct {
@@ -54,9 +59,16 @@ type BootstrapConfig struct {
 	AdminPassword string
 }
 
+// LogConfig controls the shape of the application log.
+type LogConfig struct {
+	Format string // "json" | "text"; empty picks json in production
+	Level  string // debug | info | warn | error
+}
+
 type Config struct {
 	NodeEnv    string
 	Port       string
+	Log        LogConfig
 	Database   DatabaseConfig
 	JWT        JWTConfig
 	AD         ADConfig
@@ -108,6 +120,11 @@ func Load() *Config {
 		NodeEnv: getenv("NODE_ENV", "development"),
 		Port:    getenv("PORT", "4000"),
 
+		Log: LogConfig{
+			Format: getenv("LOG_FORMAT", ""),
+			Level:  getenv("LOG_LEVEL", "info"),
+		},
+
 		Database: DatabaseConfig{
 			URL:      getenv("DATABASE_URL", "postgres://projectview:projectview@postgres:5432/projectview?sslmode=disable"),
 			MaxConns: getint("DATABASE_MAX_CONNS", 10),
@@ -116,6 +133,7 @@ func Load() *Config {
 		JWT: JWTConfig{
 			Secret:         getenv("JWT_SECRET", "change-this-secret-in-production"),
 			ExpiresInHours: getint("JWT_EXPIRES_IN_HOURS", 8),
+			RefreshDays:    getint("SESSION_REFRESH_DAYS", 30),
 		},
 
 		AD: ADConfig{

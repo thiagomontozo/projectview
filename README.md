@@ -176,6 +176,55 @@ To use a real certificate, drop `fullchain.pem` and `privkey.pem` into
 `proxy/certs/` (gitignored) and restart the proxy. `/.well-known/acme-challenge/`
 stays reachable over plain HTTP for Let's Encrypt http-01 challenges.
 
+## Hierarchy
+
+Work is organised the way comparable tools do it:
+
+```
+Space ── Folder ── List (project) ── Task ── Sub-task
+  └──────────────  List (project) ── Task
+```
+
+A **project is a List** that also carries scheduling metadata; it keeps its
+name and its API throughout. Folders never nest, which keeps permission
+resolution at a fixed depth. A List may hang directly off a Space.
+
+Spaces can be public (visible to every authenticated user, the default for an
+internal tool) or private (visible only to their members).
+
+## Sessions
+
+A login creates a server-side session. The JWT is a short-lived **access
+token** carrying that session's id, and the middleware checks the session on
+every request — so revoking it ends access immediately rather than whenever the
+token happens to expire.
+
+- **Refresh tokens** are rotated on every use, so a stolen one is good for at
+  most a single exchange before the legitimate client invalidates it. Only a
+  SHA-256 hash is stored.
+- **Deactivating an account** or **an admin resetting a password** revokes
+  every live session for that user. Changing your own password keeps the
+  browser you did it from and signs out everywhere else.
+- `GET /api/auth/sessions` lists where you are signed in;
+  `DELETE /api/auth/sessions/{id}` signs one device out.
+- **CSRF** protection applies only when the cookie alone authenticates the
+  request (double-submit token in `X-CSRF-Token`). A `Bearer` header cannot be
+  attached by a cross-site request, so those are not forgeable this way.
+- Passwords are hashed with **Argon2id**. Existing bcrypt hashes keep working
+  and are upgraded transparently the next time their owner signs in.
+
+## Audit trail
+
+Every mutation is recorded append-only in `audit_log`: who acted, what
+changed (as a before/after diff), from which IP, under which request id.
+Failed logins are recorded too, which is what an investigation actually needs.
+
+Values for sensitive keys are redacted before they are written — the trail is
+widely readable by design, so it must never become a place secrets accumulate.
+
+`GET /api/audit` is admin-only and supports filtering by actor, resource,
+action and time, with cursor pagination.
+
 ## Authorization model
 
 Authentication proves *who* is calling; these rules decide *what* they may do.
@@ -195,10 +244,23 @@ where the target document is available, and gated by role in
 | Delete a team | `admin` |
 | Edit a team, add/remove its members | Team lead, or `admin` |
 | Read or post in a chat channel | Channel members only |
+| Read the audit trail | `admin` |
+| Create spaces | `admin`, `manager` |
+| Rename or archive a space | Space `admin` or `owner` |
+| Delete a space | Space `owner`, or a global `admin` |
+| Create folders and lists in a space | Space `member` and above |
 
 Reads of projects, tasks and teams are open to any authenticated user: this is
 an internal tool where work is meant to be visible across the organization.
-Chat is the exception, since it carries private conversation.
+Chat is the exception, since it carries private conversation, and private
+spaces are invisible to non-members — a private space a caller holds no grant
+on answers 404, so the error itself does not confirm it exists.
+
+**Permissions are inherited.** A grant on a Space flows down to every Folder,
+List and Task inside it: the effective permission is the strongest of the
+global role, the space role, and direct membership on the project itself. The
+pre-hierarchy model still applies, so nothing that worked before stopped
+working.
 
 The predicates are pure functions of the loaded documents, so the whole
 role × resource × action matrix is unit-tested without a database
@@ -284,18 +346,20 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-75 assertions covering the proxy (HTTPS redirect, security headers, the
-backend not being reachable from the host), authentication, the first-run
-schema and seed, projects/tasks/sub-tasks with resource allocation and dates,
-the kanban move and its `completedAt` handling, the dashboard aggregations,
-chat, the WebSocket upgrade, and the login rate limit. It cleans up the
-fixtures it creates.
+107 assertions covering the proxy (HTTPS redirect, security headers, the
+backend not being reachable from the host), authentication and session
+revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
+projects/tasks/sub-tasks with resource allocation and dates, the kanban move
+and its `completedAt` handling, search and pagination, the audit trail, the
+dashboard aggregations, chat, the WebSocket upgrade, readiness, and the login
+rate limit. It cleans up the fixtures it creates.
 
-21 of those assertions are **authorization regression tests**: the script
-creates an ordinary member account and proves it cannot take over another
-account, read a channel it does not belong to, create projects or teams, or
-touch a project it is not a member of — while confirming it still can do the
-things a member legitimately should.
+Among them are **authorization regression tests**: the script creates an
+ordinary member account and proves it cannot take over another account, read a
+channel it does not belong to, create spaces, projects or teams, read the audit
+trail, or touch a project it is not a member of — while confirming it still can
+do the things a member legitimately should. It also proves a revoked token
+stops working immediately even though it is still cryptographically valid.
 
 ## CI/CD
 

@@ -3,6 +3,8 @@ package auth
 import (
 	"testing"
 
+	"github.com/google/uuid"
+
 	"projectview/internal/config"
 )
 
@@ -16,7 +18,7 @@ func testConfig(secret string, expiresInHours int) *config.Config {
 func TestSignAndParseRoundTrip(t *testing.T) {
 	cfg := testConfig("test-secret", 8)
 
-	token, err := SignToken(cfg, "507f1f77bcf86cd799439011", "admin")
+	token, err := SignToken(cfg, "507f1f77bcf86cd799439011", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("SignToken returned an error: %v", err)
 	}
@@ -42,7 +44,7 @@ func TestParseRejectsTokenSignedWithAnotherSecret(t *testing.T) {
 	signer := testConfig("the-real-secret", 8)
 	attacker := testConfig("a-different-secret", 8)
 
-	token, err := SignToken(attacker, "507f1f77bcf86cd799439011", "admin")
+	token, err := SignToken(attacker, "507f1f77bcf86cd799439011", "admin", uuid.New())
 	if err != nil {
 		t.Fatalf("SignToken returned an error: %v", err)
 	}
@@ -56,7 +58,7 @@ func TestParseRejectsExpiredToken(t *testing.T) {
 	// A negative lifetime produces a token that expired an hour ago.
 	cfg := testConfig("test-secret", -1)
 
-	token, err := SignToken(cfg, "507f1f77bcf86cd799439011", "member")
+	token, err := SignToken(cfg, "507f1f77bcf86cd799439011", "member", uuid.New())
 	if err != nil {
 		t.Fatalf("SignToken returned an error: %v", err)
 	}

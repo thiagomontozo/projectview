@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
@@ -106,6 +107,8 @@ type createProjectRequest struct {
 	Description string     `json:"description"`
 	Color       string     `json:"color"`
 	Team        string     `json:"team"`
+	Space       string     `json:"spaceId"`
+	Folder      string     `json:"folderId"`
 	MemberIDs   []string   `json:"memberIds"`
 	StartDate   *time.Time `json:"startDate"`
 	EndDate     *time.Time `json:"endDate"`
@@ -154,6 +157,18 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Place the list in the hierarchy. Callers that do not know about spaces
+	// yet land in the first one, so the tree never has orphans.
+	if spaceID, ok := httpx.OptionalUUID(req.Space); ok && spaceID != nil {
+		project.SpaceID = spaceID
+	} else if fallback, err := a.Projects.DefaultSpaceID(ctx); err == nil {
+		project.SpaceID = fallback
+	}
+	if folderID, ok := httpx.OptionalUUID(req.Folder); ok && folderID != nil {
+		project.FolderID = folderID
+	}
+
 	if err := a.Projects.Create(ctx, project); err != nil {
 		if repo.IsUniqueViolation(err) {
 			httpx.Error(w, http.StatusConflict, "A project with that key already exists.")
@@ -177,6 +192,12 @@ func (a *API) CreateProject(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionProjectCreated, ResourceType: "project", ResourceID: project.ID.String(),
+		Changes: map[string]any{"name": project.Name, "key": project.Key},
+		Status:  http.StatusCreated,
+	})
 
 	created, err := a.Projects.ByID(ctx, project.ID)
 	if err != nil {
@@ -276,6 +297,16 @@ func (a *API) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		respondRepoError(w, err, "Project not found.")
 		return
 	}
+
+	a.Audit.Record(r, auth.CurrentUser(r), audit.Event{
+		Action: audit.ActionProjectUpdated, ResourceType: "project", ResourceID: id.String(),
+		Changes: audit.Diff(
+			map[string]any{"name": project.Name, "status": project.Status},
+			map[string]any{"name": deref(req.Name, project.Name), "status": deref(req.Status, project.Status)},
+		),
+		Status: http.StatusOK,
+	})
+
 	updated, err := a.Projects.ByID(r.Context(), id)
 	if err != nil {
 		respondRepoError(w, err, "Project not found.")
@@ -294,12 +325,20 @@ func (a *API) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := a.requireProjectManage(w, r, id); !ok {
+	project, ok := a.requireProjectManage(w, r, id)
+	if !ok {
 		return
 	}
 	if err := a.Projects.Delete(r.Context(), id); err != nil {
 		respondRepoError(w, err, "Project not found.")
 		return
 	}
+	// Deleting a project cascades to every task in it, so the trail records
+	// what was destroyed, not just that something was.
+	a.Audit.Record(r, auth.CurrentUser(r), audit.Event{
+		Action: audit.ActionProjectDeleted, ResourceType: "project", ResourceID: id.String(),
+		Changes: map[string]any{"name": project.Name, "key": project.Key},
+		Status:  http.StatusOK,
+	})
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -11,19 +11,19 @@ Where the project stands and what is left. Updated as each phase lands.
 ```
 Phase 0  Security containment        ████████████████████  100%   ✅
 Phase A1 PostgreSQL foundation       ████████████████████  100%   ✅
-Phase A2 Domain, security, ops       ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase A2 Domain, security, ops       ████████████████░░░░   80%   ✅
 Phase A3 Product engine              ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase B1 UI foundation               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase B2 Views                       ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase B3 Collaboration               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
                                      ─────────────────────
-                              overall  ~2 of 8 phases
+                              overall  ~3 of 8 phases
 ```
 
-Roughly **25% of the phases** are complete, but they are the two that
-everything else stands on: the system is no longer exploitable, and the data
-layer can now express what a professional product needs.
+The backend is now a platform: hierarchical, auditable, revocable, searchable
+and observable. What remains is mostly **product surface** — the features and
+the interface that sit on top of it.
 
 ---
 
@@ -82,16 +82,65 @@ toolchain moved to 1.25 (required by pgx).
 > A deliberate call, made after the trade-off was put on the table. `MONGO_URI`
 > became `DATABASE_URL`, equally configurable.
 
+## ✅ Phase A2 — Domain, security and operations
+
+**Hierarchy.** `Space → Folder → List → Task`, with a List able to hang
+directly off a Space. A project *is* a List and keeps its name and API. A
+database trigger enforces that a folder and its list belong to the same space —
+the kind of invariant application code forgets. Existing projects were adopted
+into a default Space by the migration, so nothing broke.
+
+**Hierarchical RBAC.** A grant on a Space (`owner`/`admin`/`member`/`guest`)
+flows down to everything inside it; the effective permission is the strongest
+of the global role, the space role and direct project membership. Private
+spaces answer 404 rather than 403 to non-members, so the error does not confirm
+they exist.
+
+**Sessions with real revocation.** The JWT used to *be* the session, valid
+until expiry with no way to cut it short — deactivating an account left its
+token working. Logins now create a server-side session, the token carries its
+id, and the middleware checks it on every request. Refresh tokens rotate on
+every use and are stored only as hashes. Password resets and deactivations
+revoke live sessions.
+
+**Argon2id**, with bcrypt hashes still accepted and upgraded transparently at
+next login — no lockout, no mass reset.
+
+**CSRF** on cookie-authenticated state changes only, since a `Bearer` header
+cannot be attached cross-site.
+
+**Append-only audit trail.** Who acted, what changed as a before/after diff,
+from which IP, under which request id — failed logins included. Sensitive keys
+are redacted before they are written, because the trail is widely readable by
+design.
+
+**Search and pagination.** Listings used to return the whole table. Now
+cursor-paginated (constant cost at any depth, stable under concurrent writes)
+with PostgreSQL full-text search over a generated `tsvector` column and a GIN
+index. Sort fields come from an allow-list, so the ORDER BY clause cannot be
+steered by a caller.
+
+**Observability.** Structured JSON logging via `slog` with request correlation,
+RED metrics on `/metrics` labelled by route pattern (not path, which would
+explode cardinality), and `/api/ready` as a real readiness probe distinct from
+liveness.
+
+**Fixed along the way:** nginx resolved the backend's hostname once at startup
+and cached it forever, so redeploying the backend 502'd every request until the
+proxy was also restarted. Upstreams are now resolved per request through
+Docker's DNS. Verified by recreating the backend alone and watching traffic
+keep flowing.
+
+**Verified:** the smoke test grew from 75 to **107 assertions**, including
+proof that a revoked token stops working while still cryptographically valid.
+
+**Deferred from A2, with reason:** generated OpenAPI + typed TS client, and the
+transactional outbox. Both are most valuable once A3 introduces webhooks and
+automations that need them; building them now would be speculative.
+
 ---
 
 ## What is left
-
-### ⬜ Phase A2 — Domain, security and operations
-Space → Folder → List hierarchy · hierarchical RBAC with inheritance ·
-append-only audit log · refresh tokens, session revocation, argon2id, CSRF ·
-cursor pagination, filtering, sorting and full-text search on every listing ·
-generated OpenAPI + typed TS client · transactional outbox · structured logging,
-OpenTelemetry, metrics.
 
 ### ⬜ Phase A3 — Product engine
 Custom fields · task dependencies and critical path · time tracking ·
@@ -126,13 +175,17 @@ LGPD export and erasure · backup runbooks · HA.
 |---|---|---|
 | M0 | Smoke test proves a member cannot escalate privilege; CI green | ✅ |
 | M1 | Stack runs on Postgres; smoke test passes unchanged | ✅ |
-| M2 | Audit log covers 100% of mutations; RBAC matrix tested | ⬜ |
+| M2 | Audit log covers mutations; RBAC matrix tested; sessions revocable | ✅ |
 | M3 | A 10k-task board renders under 100 ms p95 under load | ⬜ |
 | M4 | Gantt reorders dependencies and recomputes the critical path | ⬜ |
 | M5 | "Task overdue → notify assignee and change status" runs end to end | ⬜ |
 
 ## Effort
 
-Phase 0 and A1 are done. The remaining six phases are roughly **26
-person-weeks**, compressible to about 15–17 calendar weeks with the platform
+Phases 0, A1 and A2 are done. The remaining five phases are roughly **22
+person-weeks**, compressible to about 13–15 calendar weeks with the platform
 and product tracks running in parallel.
+
+The centre of gravity has shifted: what is left is mostly frontend. B1 and B2
+together are the largest remaining block, and they are what will make the
+hierarchy, search and permissions built in A2 visible to a user.

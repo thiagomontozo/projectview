@@ -355,11 +355,154 @@ check "admin can reset a user's password without the old one" "200" \
     "$(status_of -X POST "$BASE/api/users/$member_id/password" -H "$AUTH" -H 'Content-Type: application/json' \
         -d '{"password":"AdminReset123"}')"
 
+# An administrative password reset signs the account out everywhere - the
+# point of the feature, since a reset is usually a response to compromise.
+check "an admin reset kills the user's live sessions" "401" \
+    "$(status_of -H "$MEMBER_AUTH" "$BASE/api/auth/me")"
+
+# Sign back in with the new password for the checks that follow.
+member_login="$("${CURL[@]}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$member_user\",\"password\":\"AdminReset123\"}")"
+MEMBER_AUTH="Authorization: Bearer $(json_str "$member_login" token)"
+check "the user can sign in with the reset password" "200" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/auth/me")"
+
 # The project survived every hostile call above.
 contains "the project was never hijacked" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id")" "Smoke Test Project"
 
 # ---------------------------------------------------------------------------
+section "Sessions and revocation"
+sessions="$("${CURL[@]}" -H "$AUTH" "$BASE/api/auth/sessions")"
+contains "the current session is listed" "$sessions" '"current":true'
+
+# A second login opens an independent session; revoking it must not disturb
+# the one making the request.
+second_login="$("${CURL[@]}" -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "$login_body")"
+SECOND_AUTH="Authorization: Bearer $(json_str "$second_login" token)"
+check "the second session works" "200" "$(status_of -H "$SECOND_AUTH" "$BASE/api/auth/me")"
+
+# Sessions come back newest first, so the second session is the first entry
+# when asked for through its own token.
+second_id="$(json_str "$("${CURL[@]}" -H "$SECOND_AUTH" "$BASE/api/auth/sessions")" id)"
+if [ -n "$second_id" ]; then
+    check "a session can be revoked" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/auth/sessions/$second_id")"
+    # This is the point of server-side sessions: the JWT is still
+    # cryptographically valid and within its lifetime, yet access is gone.
+    check "a revoked token stops working immediately" "401" \
+        "$(status_of -H "$SECOND_AUTH" "$BASE/api/auth/me")"
+    check "the revoking session is unaffected" "200" "$(status_of -H "$AUTH" "$BASE/api/auth/me")"
+else
+    fail "a session can be revoked" "could not determine the second session id"
+fi
+
+# ---------------------------------------------------------------------------
+section "Hierarchy: spaces, folders and lists"
+spaces="$("${CURL[@]}" -H "$AUTH" "$BASE/api/spaces")"
+space_id="$(json_str "$spaces" id)"
+if [ -n "$space_id" ]; then
+    pass "a space exists"
+else
+    fail "a space exists" "$spaces"
+fi
+
+new_space="$("${CURL[@]}" -X POST "$BASE/api/spaces" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Smoke Space $$\",\"description\":\"created by the smoke test\"}")"
+new_space_id="$(json_str "$new_space" id)"
+if [ -n "$new_space_id" ]; then
+    pass "space created"
+else
+    fail "space created" "$new_space"
+fi
+contains "the creator owns the space they made" "$new_space" '"yourRole":"owner"'
+
+folder="$("${CURL[@]}" -X POST "$BASE/api/spaces/$new_space_id/folders" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"name":"Smoke Folder"}')"
+folder_id="$(json_str "$folder" id)"
+if [ -n "$folder_id" ]; then
+    pass "folder created inside the space"
+else
+    fail "folder created inside the space" "$folder"
+fi
+
+listed="$("${CURL[@]}" -H "$AUTH" "$BASE/api/spaces/$new_space_id/folders")"
+contains "folder appears in the space" "$listed" "Smoke Folder"
+
+# A list placed in a folder of another space must be refused: the trigger
+# guarding that invariant lives in the database, not in application code.
+cross="$(status_of -X POST "$BASE/api/projects" -H "$AUTH" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Cross space\",\"key\":\"XSPACE$$\",\"spaceId\":\"$space_id\",\"folderId\":\"$folder_id\"}")"
+if [ "$cross" = "201" ]; then
+    fail "a folder from another space is rejected" "the API accepted it (got 201)"
+else
+    pass "a folder from another space is rejected"
+fi
+
+check "member cannot create spaces" "403" \
+    "$(status_of -X POST "$BASE/api/spaces" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
+        -d '{"name":"Rogue space"}')"
+check "member cannot delete a space" "403" \
+    "$(status_of -X DELETE "$BASE/api/spaces/$new_space_id" -H "$MEMBER_AUTH")"
+
+# ---------------------------------------------------------------------------
+section "Search and pagination"
+check "task search endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/tasks?limit=5")"
+
+paged="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?limit=1&total=true")"
+contains "results come back paginated" "$paged" '"hasMore"'
+contains "a total is reported when asked for" "$paged" '"total"'
+
+found="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?q=Smoke%20parent")"
+contains "full-text search finds the task by title" "$found" "Smoke parent task"
+
+missing="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?q=zzzznotarealword")"
+if printf '%s' "$missing" | grep -q '"items":\[\]'; then
+    pass "a search with no matches returns an empty page"
+else
+    fail "a search with no matches returns an empty page" "$missing"
+fi
+
+check "filtering by project" "200" "$(status_of -H "$AUTH" "$BASE/api/tasks?projectId=$project_id")"
+check "filtering by status" "200" "$(status_of -H "$AUTH" "$BASE/api/tasks?status=todo")"
+# An unbounded limit is a denial-of-service vector; the cap must hold.
+capped="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?limit=99999")"
+contains "an absurd limit is clamped, not honoured" "$capped" '"items"'
+
+# ---------------------------------------------------------------------------
+section "Audit trail"
+audit="$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?limit=50")"
+contains "the trail records logins"        "$audit" "auth.login"
+contains "the trail records task creation" "$audit" "task.created"
+contains "the trail records who acted"     "$audit" '"actor"'
+
+# Failed logins are exactly what an investigation needs.
+failed="$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=auth.login_failed")"
+contains "failed logins are recorded" "$failed" "auth.login_failed"
+
+# Secrets must never reach a table this widely readable.
+if printf '%s' "$audit" | grep -qi '"password"[^:]*:[^"]*"[^"]'; then
+    fail "no plaintext secrets in the trail" "a password value appears in the audit output"
+else
+    pass "no plaintext secrets in the trail"
+fi
+
+check "the trail is admin-only" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/audit")"
+
+# ---------------------------------------------------------------------------
+section "Operability"
+ready="$("${CURL[@]}" "$BASE/api/ready")"
+contains "readiness reports the database" "$ready" '"database":"ok"'
+
+# Metrics are for an internal scrape target. Reaching them from the public
+# edge would hand an outsider the shape of the whole installation.
+metrics="$("${CURL[@]}" "$BASE/metrics" 2>/dev/null)"
+if printf '%s' "$metrics" | grep -q 'projectview_http_requests_total'; then
+    fail "metrics are not reachable from the public edge" "the proxy served /metrics"
+else
+    pass "metrics are not reachable from the public edge"
+fi
+
+# ---------------------------------------------------------------------------
 section "Cleanup"
+check "smoke space deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/spaces/$new_space_id")"
 check "smoke member deactivated" "200" \
     "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"active":false}')"
 # Keeps repeated local runs from piling up fixtures in the dev database.

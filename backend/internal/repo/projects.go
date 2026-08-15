@@ -20,13 +20,15 @@ func NewProjects(store *db.Store) *Projects { return &Projects{store: store} }
 
 const projectColumns = `
 	p.id, p.name, p.key, p.description, p.color, p.status, p.team_id, p.owner_id,
-	p.start_date, p.end_date, p.created_by, p.created_at, p.updated_at`
+	p.start_date, p.end_date, p.created_by, p.created_at, p.updated_at,
+	p.space_id, p.folder_id, p.position, p.archived`
 
 func scanProject(row pgx.Row) (*models.Project, error) {
 	var p models.Project
 	err := row.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.Color, &p.Status,
 		&p.TeamID, &p.Owner, &p.StartDate, &p.EndDate, &p.CreatedBy,
-		&p.CreatedAt, &p.UpdatedAt)
+		&p.CreatedAt, &p.UpdatedAt,
+		&p.SpaceID, &p.FolderID, &p.Position, &p.Archived)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -161,10 +163,12 @@ func (r *Projects) Create(ctx context.Context, p *models.Project) error {
 	return r.store.WithTx(ctx, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO projects (id, name, key, description, color, status, team_id,
-			                      owner_id, start_date, end_date, created_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			                      owner_id, start_date, end_date, created_by,
+			                      space_id, folder_id, position)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 			p.ID, p.Name, p.Key, p.Description, p.Color, p.Status, p.TeamID,
-			p.Owner, p.StartDate, p.EndDate, p.CreatedBy)
+			p.Owner, p.StartDate, p.EndDate, p.CreatedBy,
+			p.SpaceID, p.FolderID, p.Position)
 		if err != nil {
 			return err
 		}
@@ -187,6 +191,51 @@ type ProjectPatch struct {
 	StartDate   **time.Time
 	EndDate     **time.Time
 	Statuses    *[]models.ProjectStatus
+	SpaceID     *uuid.UUID
+	FolderID    **uuid.UUID
+	Position    *int
+	Archived    *bool
+}
+
+// DefaultSpaceID returns the space a new project should land in when the
+// caller did not name one: the first space they can see. Keeps the hierarchy
+// populated without forcing every client to know about spaces yet.
+func (r *Projects) DefaultSpaceID(ctx context.Context) (*uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.store.Pool.QueryRow(ctx,
+		`SELECT id FROM spaces WHERE NOT archived ORDER BY position, created_at LIMIT 1`).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}
+
+// BySpace lists the projects (lists) inside a space, optionally within one
+// folder.
+func (r *Projects) BySpace(ctx context.Context, spaceID uuid.UUID, folderID *uuid.UUID) ([]models.Project, error) {
+	rows, err := r.store.Pool.Query(ctx, `
+		SELECT `+projectColumns+`
+		  FROM projects p
+		 WHERE p.space_id = $1
+		   AND ($2::uuid IS NULL OR p.folder_id = $2)
+		 ORDER BY p.position, p.created_at`, spaceID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.Project{}
+	for rows.Next() {
+		p, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, rows.Err()
 }
 
 func (r *Projects) Update(ctx context.Context, id uuid.UUID, p ProjectPatch) error {
@@ -217,6 +266,18 @@ func (r *Projects) Update(ctx context.Context, id uuid.UUID, p ProjectPatch) err
 		}
 		if p.EndDate != nil {
 			add("end_date", *p.EndDate)
+		}
+		if p.SpaceID != nil {
+			add("space_id", *p.SpaceID)
+		}
+		if p.FolderID != nil {
+			add("folder_id", *p.FolderID)
+		}
+		if p.Position != nil {
+			add("position", *p.Position)
+		}
+		if p.Archived != nil {
+			add("archived", *p.Archived)
 		}
 
 		tag, err := tx.Exec(ctx, `UPDATE projects SET `+strings.Join(sets, ", ")+` WHERE id = $1`, args...)

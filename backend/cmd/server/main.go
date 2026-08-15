@@ -23,6 +23,7 @@ import (
 	"projectview/internal/db"
 	"projectview/internal/handlers"
 	"projectview/internal/logger"
+	"projectview/internal/obs"
 	"projectview/internal/router"
 	"projectview/internal/seed"
 	"projectview/internal/services"
@@ -33,6 +34,7 @@ func main() {
 	_ = godotenv.Load() // optional; environment variables always take precedence in containers
 
 	cfg := config.Load()
+	logger.Configure(cfg.Log.Format, cfg.Log.Level, cfg.NodeEnv)
 
 	store, err := db.Connect(cfg)
 	if err != nil {
@@ -42,10 +44,11 @@ func main() {
 	defer store.Close()
 
 	hub := ws.NewHub()
-	api := handlers.New(store, cfg, hub)
+	metrics := obs.NewMetrics()
+	api := handlers.New(store, cfg, hub, metrics)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := seed.Run(ctx, api.Users, api.Teams, api.Projects, api.Chat, cfg); err != nil {
+	if err := seed.Run(ctx, api.Users, api.Teams, api.Spaces, api.Projects, api.Chat, cfg); err != nil {
 		logger.Error("failed to seed database: %v", err)
 	}
 	cancel()
@@ -55,7 +58,11 @@ func main() {
 	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier)
 	alertScheduler.Start()
 
-	handler := router.New(api, cfg, hub)
+	// Expired and revoked sessions accumulate forever otherwise; prune them
+	// hourly so the table stays proportional to actual usage.
+	go pruneSessions(api)
+
+	handler := router.New(api, cfg, hub, metrics)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -83,6 +90,22 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+// pruneSessions deletes sessions that expired or were revoked long enough ago
+// to be of no forensic interest.
+func pruneSessions(api *handlers.API) {
+	const retention = 7 * 24 * time.Hour
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if n, err := api.Sessions.DeleteExpired(context.Background(), retention); err != nil {
+			logger.Warn("session cleanup failed: %v", err)
+		} else if n > 0 {
+			logger.Info("Pruned %d expired session(s)", n)
+		}
+		<-ticker.C
+	}
 }
 
 func enabledLabel(enabled bool) string {

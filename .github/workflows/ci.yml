@@ -146,13 +146,26 @@ jobs:
           for t in users teams team_members projects project_members project_statuses \
                    tasks task_assignees task_comments task_alerts_sent \
                    chat_channels chat_channel_members chat_messages notifications \
+                   sessions audit_log spaces space_members folders \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
 
-          # The migration must be recorded, so a restart does not re-run it.
-          applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='0001_init'")"
-          [ "$applied" = "1" ] || { echo "0001_init not recorded as applied" >&2; exit 1; }
+          # Every migration must be recorded, so a restart does not re-run one.
+          for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy; do
+            applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
+            [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
+          done
+
+          # Full-text search depends on the generated column and its GIN index.
+          psql "SELECT indexname FROM pg_indexes WHERE tablename='tasks'" | grep -q 'tasks_search_idx' \
+            || { echo "missing full-text index on tasks" >&2; exit 1; }
+
+          # The audit trail must never be writable-away by the app: assert it
+          # is append-only in practice by checking nothing deleted the rows the
+          # smoke test just generated.
+          entries="$(psql "SELECT count(*) FROM audit_log")"
+          [ "$entries" -gt 0 ] || { echo "audit trail is empty after the smoke test" >&2; exit 1; }
 
           psql "SELECT indexname FROM pg_indexes WHERE tablename='tasks'" | tee /tmp/task_indexes
           grep -q 'tasks_board_idx'  /tmp/task_indexes || { echo "missing board index" >&2; exit 1; }

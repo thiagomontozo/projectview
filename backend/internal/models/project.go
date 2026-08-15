@@ -13,6 +13,8 @@ type ProjectStatus struct {
 	Color string `json:"color"`
 }
 
+// Project is a List in the Space -> Folder -> List hierarchy that also carries
+// scheduling metadata. It keeps the name "project" throughout the API.
 type Project struct {
 	ID          uuid.UUID       `json:"id"`
 	Name        string          `json:"name"`
@@ -20,6 +22,10 @@ type Project struct {
 	Description string          `json:"description,omitempty"`
 	Color       string          `json:"color"`
 	Status      string          `json:"status"`
+	SpaceID     *uuid.UUID      `json:"spaceId,omitempty"`
+	FolderID    *uuid.UUID      `json:"folderId,omitempty"`
+	Position    int             `json:"position"`
+	Archived    bool            `json:"archived"`
 	TeamID      *uuid.UUID      `json:"-"`
 	Members     []uuid.UUID     `json:"-"`
 	Owner       *uuid.UUID      `json:"-"`

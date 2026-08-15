@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 
+	"projectview/internal/auth"
 	"projectview/internal/config"
 	"projectview/internal/logger"
 	"projectview/internal/models"
@@ -17,7 +17,7 @@ import (
 )
 
 // Run creates the starter workspace when the database has no users yet.
-func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, projects *repo.Projects, chat *repo.Chat, cfg *config.Config) error {
+func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, spaces *repo.Spaces, projects *repo.Projects, chat *repo.Chat, cfg *config.Config) error {
 	count, err := users.Count(ctx)
 	if err != nil {
 		return err
@@ -29,7 +29,7 @@ func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, projects *re
 
 	logger.Info("No users found - creating default admin account and sample workspace.")
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.Bootstrap.AdminPassword), bcrypt.DefaultCost)
+	hash, err := auth.HashPassword(cfg.Bootstrap.AdminPassword)
 	if err != nil {
 		return err
 	}
@@ -63,6 +63,21 @@ func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, projects *re
 		return err
 	}
 
+	// The hierarchy starts populated, so a fresh install already shows the
+	// Space -> List structure rather than an empty shell.
+	space := &repo.Space{
+		ID:          uuid.New(),
+		Name:        "Workspace",
+		Description: "Top level of the hierarchy. Create more spaces per department, client or initiative.",
+		Color:       "#2a78d6",
+		CreatedBy:   &admin.ID,
+	}
+	if err := spaces.Create(ctx, space, []repo.SpaceMember{
+		{UserID: admin.ID, Role: repo.SpaceRoleOwner},
+	}); err != nil {
+		return err
+	}
+
 	project := &models.Project{
 		ID:          uuid.New(),
 		Name:        "Sample Project",
@@ -70,6 +85,7 @@ func Run(ctx context.Context, users *repo.Users, teams *repo.Teams, projects *re
 		Description: "A starter project you can rename, archive, or delete.",
 		Color:       "#8b5cf6",
 		Status:      models.ProjectStatusPlanning,
+		SpaceID:     &space.ID,
 		TeamID:      &team.ID,
 		Members:     []uuid.UUID{admin.ID},
 		Owner:       &admin.ID,

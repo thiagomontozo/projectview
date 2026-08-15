@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -129,17 +130,24 @@ func (a *API) loadProject(w http.ResponseWriter, r *http.Request, id uuid.UUID) 
 }
 
 // requireProjectWork loads a project and stops the request unless the caller
-// may change the work inside it.
+// may change the work inside it - directly, or through a grant on the space
+// the project lives in.
 func (a *API) requireProjectWork(w http.ResponseWriter, r *http.Request, id uuid.UUID) (*models.Project, bool) {
 	p, ok := a.loadProject(w, r, id)
 	if !ok {
 		return nil, false
 	}
-	if !canWorkOnProject(p, auth.CurrentUser(r)) {
-		httpx.Error(w, http.StatusForbidden, forbiddenMessage)
-		return nil, false
+	user := auth.CurrentUser(r)
+	if canWorkOnProject(p, user) {
+		return p, true
 	}
-	return p, true
+	// Inherited: any grant above guest on the enclosing space carries the
+	// right to work on the lists inside it.
+	if repo.SpaceRoleAtLeast(a.inheritedProjectRole(r.Context(), id, user.ID), repo.SpaceRoleMember) {
+		return p, true
+	}
+	httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+	return nil, false
 }
 
 // requireProjectManage loads a project and stops the request unless the caller
@@ -149,11 +157,17 @@ func (a *API) requireProjectManage(w http.ResponseWriter, r *http.Request, id uu
 	if !ok {
 		return nil, false
 	}
-	if !canManageProject(p, auth.CurrentUser(r)) {
-		httpx.Error(w, http.StatusForbidden, forbiddenMessage)
-		return nil, false
+	user := auth.CurrentUser(r)
+	if canManageProject(p, user) {
+		return p, true
 	}
-	return p, true
+	// Managing a list requires administering its space - deliberately
+	// stricter than merely working in it.
+	if repo.SpaceRoleAtLeast(a.inheritedProjectRole(r.Context(), id, user.ID), repo.SpaceRoleAdmin) {
+		return p, true
+	}
+	httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+	return nil, false
 }
 
 // requireTaskWork resolves a task together with the project owning it, and
@@ -170,6 +184,110 @@ func (a *API) requireTaskWork(w http.ResponseWriter, r *http.Request, taskID uui
 		return nil, nil, false
 	}
 	return t, p, true
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchical access
+//
+// A grant on a Space flows down to every Folder, List and Task inside it. The
+// effective permission on a resource is the strongest of:
+//
+//   - global role (admin sees and does everything)
+//   - the space role held over the resource's space
+//   - direct membership on the project itself (the pre-hierarchy model, still
+//     honoured so nothing that worked before stops working)
+// ---------------------------------------------------------------------------
+
+// requireSpaceRead loads a space the caller is allowed to see.
+func (a *API) requireSpaceRead(w http.ResponseWriter, r *http.Request) (*repo.Space, bool) {
+	id, ok := httpx.UUIDParam(w, r, "id")
+	if !ok {
+		return nil, false
+	}
+	space, err := a.Spaces.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "Space not found.")
+		return nil, false
+	}
+
+	user := auth.CurrentUser(r)
+	if isAdmin(user) || !space.IsPrivate {
+		return space, true
+	}
+	role, err := a.Spaces.RoleFor(r.Context(), space.ID, user.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	if role == "" {
+		// A private space the caller holds no grant on must be
+		// indistinguishable from one that does not exist, otherwise the
+		// error itself confirms it is there.
+		httpx.Error(w, http.StatusNotFound, "Space not found.")
+		return nil, false
+	}
+	return space, true
+}
+
+// requireSpaceRole loads a space and enforces a minimum role on it.
+func (a *API) requireSpaceRole(w http.ResponseWriter, r *http.Request, minimum string) (*repo.Space, bool) {
+	space, ok := a.requireSpaceRead(w, r)
+	if !ok {
+		return nil, false
+	}
+	user := auth.CurrentUser(r)
+	if isAdmin(user) {
+		return space, true
+	}
+	role, err := a.Spaces.RoleFor(r.Context(), space.ID, user.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	if !repo.SpaceRoleAtLeast(role, minimum) {
+		httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+		return nil, false
+	}
+	return space, true
+}
+
+// requireFolderRole resolves a folder and enforces a minimum role on the space
+// containing it - the inheritance step from Space down to Folder.
+func (a *API) requireFolderRole(w http.ResponseWriter, r *http.Request, minimum string) (*repo.Folder, bool) {
+	id, ok := httpx.UUIDParam(w, r, "id")
+	if !ok {
+		return nil, false
+	}
+	folder, err := a.Folders.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "Folder not found.")
+		return nil, false
+	}
+
+	user := auth.CurrentUser(r)
+	if isAdmin(user) {
+		return folder, true
+	}
+	role, err := a.Spaces.RoleFor(r.Context(), folder.SpaceID, user.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	if !repo.SpaceRoleAtLeast(role, minimum) {
+		httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+		return nil, false
+	}
+	return folder, true
+}
+
+// inheritedProjectRole returns the space role the caller holds over a project,
+// or "" when they hold none.
+func (a *API) inheritedProjectRole(ctx context.Context, projectID, userID uuid.UUID) string {
+	role, err := a.Spaces.RoleForProject(ctx, projectID, userID)
+	if err != nil {
+		return ""
+	}
+	return role
 }
 
 // requireTeamManage loads a team and stops the request unless the caller may

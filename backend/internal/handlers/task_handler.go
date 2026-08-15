@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
 	"projectview/internal/models"
@@ -119,6 +120,72 @@ func (a *API) ListTasksForProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, a.populateTasks(r.Context(), tasks, false))
+}
+
+// GET /api/tasks - filtered, searchable, cursor-paginated task listing.
+//
+// Replaces the "return every row" behaviour the other listings had: with ten
+// thousand tasks that was a slow query, a large response and a slow render.
+//
+// Query: q, projectId, assigneeId, status, priority, overdue, topLevel,
+// limit, cursor.
+func (a *API) SearchTasks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	params := httpx.ParseList(r, map[string]string{}, "")
+
+	query := repo.TaskQuery{
+		Search:     params.Search,
+		Status:     q.Get("status"),
+		Priority:   q.Get("priority"),
+		Overdue:    q.Get("overdue") == "true",
+		ParentOnly: q.Get("topLevel") == "true",
+		Limit:      params.Limit,
+	}
+
+	if raw := q.Get("projectId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid projectId.")
+			return
+		}
+		query.ProjectID = &id
+	}
+	if raw := q.Get("assigneeId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid assigneeId.")
+			return
+		}
+		query.AssigneeID = &id
+	}
+	if params.Cursor != "" {
+		if sortValue, idValue, ok := httpx.DecodeCursor(params.Cursor); ok {
+			if t, ok := httpx.ParseTimeCursor(sortValue); ok {
+				query.CursorTime = &t
+			}
+			if id, err := uuid.Parse(idValue); err == nil {
+				query.CursorID = &id
+			}
+		}
+	}
+
+	tasks, err := a.Tasks.Search(r.Context(), query)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	populated := a.populateTasks(r.Context(), tasks, true)
+	page := httpx.NewPage(populated, query.Limit, func(t taskResponse) string {
+		return httpx.EncodeCursor(httpx.TimeCursor(t.CreatedAt), t.ID.String())
+	})
+
+	if q.Get("total") == "true" {
+		if total, err := a.Tasks.CountMatching(r.Context(), query); err == nil {
+			page.Total = &total
+		}
+	}
+	httpx.JSON(w, http.StatusOK, page)
 }
 
 // GET /api/tasks/mine
@@ -258,6 +325,12 @@ func (a *API) createTask(w http.ResponseWriter, r *http.Request, req createTaskR
 		})
 	}
 
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionTaskCreated, ResourceType: "task", ResourceID: task.ID.String(),
+		Changes: map[string]any{"title": task.Title, "projectId": projectID.String()},
+		Status:  http.StatusCreated,
+	})
+
 	created, err := a.Tasks.ByID(ctx, task.ID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
@@ -345,6 +418,18 @@ func (a *API) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requester := auth.CurrentUser(r)
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionTaskUpdated, ResourceType: "task", ResourceID: id.String(),
+		Changes: audit.Diff(
+			map[string]any{"title": existing.Title, "status": existing.Status, "priority": existing.Priority},
+			map[string]any{
+				"title":    deref(req.Title, existing.Title),
+				"status":   deref(req.Status, existing.Status),
+				"priority": deref(req.Priority, existing.Priority),
+			},
+		),
+		Status: http.StatusOK,
+	})
 	if req.Assignees != nil {
 		notifier := a.notifier()
 		for _, userID := range newAssignees {
@@ -383,7 +468,8 @@ func (a *API) MoveTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, _, ok := a.requireTaskWork(w, r, id); !ok {
+	existing, _, ok := a.requireTaskWork(w, r, id)
+	if !ok {
 		return
 	}
 	var req moveTaskRequest
@@ -396,6 +482,13 @@ func (a *API) MoveTask(w http.ResponseWriter, r *http.Request) {
 	if err := a.Tasks.Update(r.Context(), id, repo.TaskPatch{Status: req.Status, Order: req.Order}); err != nil {
 		respondRepoError(w, err, "Task not found.")
 		return
+	}
+	if req.Status != nil && *req.Status != existing.Status {
+		a.Audit.Record(r, auth.CurrentUser(r), audit.Event{
+			Action: audit.ActionTaskMoved, ResourceType: "task", ResourceID: id.String(),
+			Changes: map[string]any{"status": map[string]any{"from": existing.Status, "to": *req.Status}},
+			Status:  http.StatusOK,
+		})
 	}
 	t, err := a.Tasks.ByID(r.Context(), id)
 	if err != nil {
@@ -411,7 +504,8 @@ func (a *API) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, _, ok := a.requireTaskWork(w, r, id); !ok {
+	existing, _, ok := a.requireTaskWork(w, r, id)
+	if !ok {
 		return
 	}
 	// Sub-tasks go with it through ON DELETE CASCADE.
@@ -419,6 +513,10 @@ func (a *API) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		respondRepoError(w, err, "Task not found.")
 		return
 	}
+	a.Audit.Record(r, auth.CurrentUser(r), audit.Event{
+		Action: audit.ActionTaskDeleted, ResourceType: "task", ResourceID: id.String(),
+		Changes: map[string]any{"title": existing.Title}, Status: http.StatusOK,
+	})
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

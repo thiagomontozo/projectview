@@ -15,14 +15,17 @@ import (
 	"projectview/internal/config"
 	"projectview/internal/handlers"
 	"projectview/internal/models"
+	"projectview/internal/obs"
 	"projectview/internal/ws"
 )
 
-func New(api *handlers.API, cfg *config.Config, hub *ws.Hub) http.Handler {
+func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
-	r.Use(chimw.Logger)
+	// Replaces chi's text logger: one structured record per request, carrying
+	// the request id so a report can be traced back to the calls behind it.
+	r.Use(obs.Observe(metrics))
 	r.Use(chimw.Recoverer)
 	r.Use(corsMiddleware(cfg.CORSOrigin))
 
@@ -31,20 +34,55 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub) http.Handler {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Readiness is distinct from liveness: this one fails when the database
+	// is unreachable, so an orchestrator stops routing traffic here.
+	r.Get("/api/ready", api.Ready)
+
+	// Prometheus scrape target. Not published through the edge proxy.
+	r.Get("/metrics", metrics.Handler())
+
 	// Realtime push channel (auth via ?token=, see handlers.ServeWS).
 	r.Get("/ws", api.ServeWS)
 
-	requireAuth := auth.RequireAuth(api.Users, cfg)
+	requireAuth := auth.RequireAuth(api.Users, api.Sessions, cfg)
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Get("/config", api.AuthConfig)
 		r.Post("/login", api.Login)
 		r.Post("/logout", api.Logout)
+		// Refresh authenticates with the refresh cookie itself, so it sits
+		// outside RequireAuth: the access token is expected to be expired.
+		r.Post("/refresh", api.Refresh)
 		r.With(requireAuth).Get("/me", api.Me)
+		r.With(requireAuth).Get("/sessions", api.ListSessions)
+		r.With(requireAuth).Delete("/sessions/{id}", api.RevokeSession)
 		// Account creation mints accounts and assigns roles, so it is an
 		// administrative action - never an anonymous one.
 		r.With(requireAuth, auth.RequireRole(models.RoleAdmin)).Post("/register", api.Register)
 	})
+
+	r.Route("/api/spaces", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/", api.ListSpaces)
+		r.Post("/", api.CreateSpace)
+		r.Get("/{id}", api.GetSpace)
+		r.Put("/{id}", api.UpdateSpace)
+		r.Delete("/{id}", api.DeleteSpace)
+		r.Post("/{id}/members", api.SetSpaceMember)
+		r.Delete("/{id}/members/{userId}", api.RemoveSpaceMember)
+		r.Get("/{id}/folders", api.ListFolders)
+		r.Post("/{id}/folders", api.CreateFolder)
+	})
+
+	r.Route("/api/folders", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Put("/{id}", api.UpdateFolder)
+		r.Delete("/{id}", api.DeleteFolder)
+	})
+
+	// The audit trail records the whole installation's activity, including
+	// failed logins, so reading it is an administrative action.
+	r.With(requireAuth, auth.RequireRole(models.RoleAdmin)).Get("/api/audit", api.ListAudit)
 
 	r.Route("/api/users", func(r chi.Router) {
 		r.Use(requireAuth)
@@ -79,6 +117,7 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub) http.Handler {
 
 	r.Route("/api/tasks", func(r chi.Router) {
 		r.Use(requireAuth)
+		r.Get("/", api.SearchTasks)
 		r.Get("/mine", api.MyTasks)
 		r.Post("/", api.CreateTask)
 		r.Get("/{id}", api.GetTask)
