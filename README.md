@@ -456,7 +456,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-246 assertions covering the proxy (HTTPS redirect, security headers, the
+247 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move

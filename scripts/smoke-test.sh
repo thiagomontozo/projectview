@@ -1073,6 +1073,22 @@ check "smoke task deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/ta
 check "smoke project deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/projects/$project_id")"
 
 # ---------------------------------------------------------------------------
+section "API rate limiting"
+# The limit is keyed by client address, and in a corporate deployment that is
+# the office's NAT gateway - one address for everybody. A limit tight enough to
+# throttle a single busy board would throttle the whole company, so this proves
+# a burst the size of several page loads passes untouched.
+burst_codes=""
+for _ in $(seq 1 80); do
+    burst_codes="$burst_codes $(status_of -H "$AUTH" "$BASE/api/projects")"
+done
+if printf '%s' "$burst_codes" | grep -q 429; then
+    fail "ordinary use is not rate limited" "a burst of 80 reads hit the limiter"
+else
+    pass "ordinary use is not rate limited"
+fi
+
+# ---------------------------------------------------------------------------
 # Runs last: it deliberately exhausts the login rate limiter for a minute.
 section "Login rate limiting"
 codes=""

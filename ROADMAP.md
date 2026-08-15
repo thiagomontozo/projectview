@@ -412,7 +412,7 @@ setup, privacy requests, and exactly what would have to change before running a
 second replica — the WebSocket hub is per-process and the schedulers have no
 lock, and both are named rather than glossed over.
 
-**Verified:** the smoke test grew from 172 to **246 assertions**, including the
+**Verified:** the smoke test grew from 172 to **247 assertions**, including the
 full SCIM lifecycle against a real service token, an erasure that leaves a
 tombstone and an audit entry, and the negative cases (a member cannot read the
 portfolio, mint a token, capture a baseline or declare an organisation-wide
@@ -467,7 +467,7 @@ Every phase of the plan is done. Against the original estimate of ~30
 person-weeks, the eight phases landed as **9 verified deliveries**.
 
 What the system is now, measured rather than asserted: **6 embedded migrations**
-applied on boot, **9 Go test packages**, **246 end-to-end assertions** against a
+applied on boot, **9 Go test packages**, **247 end-to-end assertions** against a
 real containerised stack, and **5 CI jobs** gating every push.
 
 The honest remaining risk is **M3**: the load test has not been run. Everything
