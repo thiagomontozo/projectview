@@ -391,6 +391,9 @@ func (a *API) SCIMPatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deactivated && !a.scimMayDeactivate(w, user) {
+		return
+	}
 	if err := a.Users.Update(r.Context(), user.ID, patch); err != nil {
 		scimError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -418,6 +421,9 @@ func (a *API) SCIMDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.scimMayDeactivate(w, user) {
+		return
+	}
 	inactive := false
 	if err := a.Users.Update(r.Context(), user.ID, repo.UserPatch{Active: &inactive}); err != nil {
 		scimError(w, http.StatusInternalServerError, err.Error())
@@ -425,6 +431,29 @@ func (a *API) SCIMDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	a.scimAfterDeactivation(r, user.ID, false)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// scimMayDeactivate stops a directory sync from locking everybody out.
+//
+// The same rule as the settings screen, enforced here too: a provisioning
+// client acting on the last administrator would otherwise leave the
+// installation with nobody able to administer it, and it would do so
+// automatically, at three in the morning.
+func (a *API) scimMayDeactivate(w http.ResponseWriter, user *models.User) bool {
+	if user.Role != models.RoleAdmin || !user.Active {
+		return true
+	}
+	others, err := a.Users.OtherActiveAdmins(context.Background(), user.ID)
+	if err != nil {
+		scimError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if others == 0 {
+		scimError(w, http.StatusConflict,
+			"This is the last administrator; deactivating it would lock everyone out.")
+		return false
+	}
+	return true
 }
 
 // scimAfterDeactivation makes deprovisioning actually take effect.

@@ -82,6 +82,20 @@ func (r *Users) ByLogin(ctx context.Context, login string) (*models.User, error)
 	return r.withTeams(ctx, u)
 }
 
+// OtherActiveAdmins counts the administrators who could still administer the
+// installation if the given account stopped being one.
+//
+// Anonymised accounts are excluded even when the row still says admin: an
+// erased tombstone cannot sign in, so counting it would let the last real
+// administrator lock everybody out.
+func (r *Users) OtherActiveAdmins(ctx context.Context, excluding uuid.UUID) (int, error) {
+	var n int
+	err := r.store.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM users
+		 WHERE role = 'admin' AND active AND anonymized_at IS NULL AND id <> $1`, excluding).Scan(&n)
+	return n, err
+}
+
 // ByExternalID resolves an account by the identity provider's subject. This,
 // not the username, is what an account is linked by: a provider may rename a
 // person, and the subject is the only thing that survives it.

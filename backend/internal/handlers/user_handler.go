@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
@@ -49,6 +51,35 @@ type updateUserRequest struct {
 }
 
 // PUT /api/users/:id
+// otherAdminRemains reports whether somebody else could still administer the
+// installation once this account stops being able to. Writes the refusal
+// itself, so callers only have to stop.
+func (a *API) otherAdminRemains(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {
+	target, err := a.Users.ByID(r.Context(), id)
+	if err != nil {
+		respondRepoError(w, err, "User not found.")
+		return false
+	}
+	// Only an active administrator can be the last one.
+	if target.Role != models.RoleAdmin || !target.Active {
+		return true
+	}
+
+	others, err := a.Users.OtherActiveAdmins(r.Context(), id)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if others == 0 {
+		// 409 rather than 403: the request is well formed and the caller is
+		// allowed to make it. It conflicts with the state of the system.
+		httpx.Error(w, http.StatusConflict,
+			"This is the last administrator. Promote somebody else first.")
+		return false
+	}
+	return true
+}
+
 func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id, ok := httpx.UUIDParam(w, r, "id")
 	if !ok {
@@ -73,7 +104,17 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		NotifyByEmail: req.NotifyByEmail,
 	}
 	// Role and activation are administrative, even on your own account.
-	if isAdmin(requester) {
+	//
+	// Refused rather than quietly dropped. Ignoring the field and answering
+	// 200 tells the caller the change was applied when it was not: harmless
+	// for an attacker, who learns nothing either way, and thoroughly
+	// misleading for anyone else - including an administrator who edits their
+	// own profile and believes something happened.
+	if req.Role != nil || req.Active != nil {
+		if !isAdmin(requester) {
+			httpx.Error(w, http.StatusForbidden, "Only an administrator can change a role or activate an account.")
+			return
+		}
 		if req.Role != nil {
 			if !models.ValidRole(*req.Role) {
 				httpx.Error(w, http.StatusBadRequest, "Invalid role.")
@@ -82,6 +123,15 @@ func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			patch.Role = req.Role
 		}
 		patch.Active = req.Active
+	}
+
+	// Nothing may leave the installation with nobody able to administer it.
+	// The path back from that is an UPDATE against the database, which is not
+	// a recovery procedure anyone should be one careless click away from.
+	losesAdmin := (patch.Role != nil && *patch.Role != models.RoleAdmin) ||
+		(patch.Active != nil && !*patch.Active)
+	if losesAdmin && !a.otherAdminRemains(w, r, id) {
+		return
 	}
 
 	if err := a.Users.Update(r.Context(), id, patch); err != nil {

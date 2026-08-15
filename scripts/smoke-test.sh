@@ -27,6 +27,12 @@ ADMIN_PASS="${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}"
 # field names to lowercase, HTTP/1.1 does not.
 CURL=(curl -sk --http1.1 --max-time 20)
 
+# Fixture names have to be unique per run, and the shell's PID alone is not:
+# on Git Bash under Windows the numbers are small and get reused within
+# minutes, so a second run collides with the deactivated account the first one
+# left behind and every later assertion fails as an unauthenticated 401.
+RUN_ID="$$$(date +%s | tail -c 6)"
+
 PASS=0
 FAIL=0
 
@@ -168,7 +174,7 @@ contains "admin user exists" "$users" "\"email\":"
 section "Projects, tasks, sub-tasks and allocation"
 me_id="$(json_str "$me" id)"
 
-project_payload="{\"name\":\"Smoke Test Project\",\"key\":\"SMOKE$$\",\"description\":\"created by scripts/smoke-test.sh\"}"
+project_payload="{\"name\":\"Smoke Test Project\",\"key\":\"SMOKE${RUN_ID}\",\"description\":\"created by scripts/smoke-test.sh\"}"
 project="$("${CURL[@]}" -X POST "$BASE/api/projects" -H "$AUTH" -H 'Content-Type: application/json' -d "$project_payload")"
 project_id="$(json_str "$project" id)"
 
@@ -337,7 +343,7 @@ check "notifications endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/notifica
 # Every check below runs as an ordinary member and must be refused.
 section "Authorization boundaries"
 
-member_user="smoke_member_$$"
+member_user="smoke_member_${RUN_ID}"
 member_pass="SmokeMember123!"
 member_payload="{\"username\":\"$member_user\",\"name\":\"Smoke Member\",\"email\":\"$member_user@example.com\",\"password\":\"$member_pass\",\"role\":\"member\"}"
 
@@ -347,7 +353,7 @@ check "anonymous cannot create an account" "401" \
     "$(status_of -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -d "$member_payload")"
 check "an unknown role is rejected" "400" \
     "$(status_of -X POST "$BASE/api/auth/register" -H "$AUTH" -H 'Content-Type: application/json' \
-        -d "{\"username\":\"smoke_bad_$$\",\"name\":\"x\",\"email\":\"smoke_bad_$$@example.com\",\"password\":\"Password123\",\"role\":\"root\"}")"
+        -d "{\"username\":\"smoke_bad_${RUN_ID}\",\"name\":\"x\",\"email\":\"smoke_bad_${RUN_ID}@example.com\",\"password\":\"Password123\",\"role\":\"root\"}")"
 
 created="$("${CURL[@]}" -X POST "$BASE/api/auth/register" -H "$AUTH" -H 'Content-Type: application/json' -d "$member_payload")"
 member_id="$(json_str "$created" id)"
@@ -368,10 +374,13 @@ check "member cannot change another user's password" "403" \
 check "member cannot edit another user's profile" "403" \
     "$(status_of -X PUT "$BASE/api/users/$me_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' -d '{"name":"Hijacked"}')"
 
-# Role changes stay admin-only even on your own account.
-self_promote="$("${CURL[@]}" -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
-    -d '{"role":"admin"}')"
-contains "member cannot promote themselves" "$self_promote" '"role":"member"'
+# Role changes stay admin-only even on your own account, and the request is
+# refused rather than silently stripped of the field. It used to answer 200
+# with the role unchanged, which told the caller a change had been applied
+# when it had not.
+check "member cannot promote themselves" "403" \
+    "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH" \
+        -H 'Content-Type: application/json' -d '{"role":"admin"}')"
 
 # --- Private conversation ---------------------------------------------------
 check "member cannot read a channel they are not in" "403" \
@@ -602,7 +611,7 @@ else
 fi
 
 new_space="$("${CURL[@]}" -X POST "$BASE/api/spaces" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"Smoke Space $$\",\"description\":\"created by the smoke test\"}")"
+    -d "{\"name\":\"Smoke Space ${RUN_ID}\",\"description\":\"created by the smoke test\"}")"
 new_space_id="$(json_str "$new_space" id)"
 if [ -n "$new_space_id" ]; then
     pass "space created"
@@ -626,7 +635,7 @@ contains "folder appears in the space" "$listed" "Smoke Folder"
 # A list placed in a folder of another space must be refused: the trigger
 # guarding that invariant lives in the database, not in application code.
 cross="$(status_of -X POST "$BASE/api/projects" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"Cross space\",\"key\":\"XSPACE$$\",\"spaceId\":\"$space_id\",\"folderId\":\"$folder_id\"}")"
+    -d "{\"name\":\"Cross space\",\"key\":\"XSPACE${RUN_ID}\",\"spaceId\":\"$space_id\",\"folderId\":\"$folder_id\"}")"
 if [ "$cross" = "201" ]; then
     fail "a folder from another space is rejected" "the API accepted it (got 201)"
 else
@@ -693,7 +702,7 @@ check "a member cannot delete the document" "403" \
 # The same inheritance in the direction that matters: a private space hides its
 # documents, and hides them as absent rather than as forbidden.
 private_space="$("${CURL[@]}" -X POST "$BASE/api/spaces" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"Smoke Private $$\",\"isPrivate\":true}")"
+    -d "{\"name\":\"Smoke Private ${RUN_ID}\",\"isPrivate\":true}")"
 private_space_id="$(json_str "$private_space" id)"
 private_doc="$("${CURL[@]}" -X POST "$BASE/api/docs" -H "$AUTH" -H 'Content-Type: application/json' \
     -d "{\"spaceId\":\"$private_space_id\",\"title\":\"Secret\",\"content\":\"confidential\"}")"
@@ -734,7 +743,7 @@ check "an unknown digest cadence is rejected" "400" \
 # ---------------------------------------------------------------------------
 section "Goals and OKRs"
 goal="$("${CURL[@]}" -X POST "$BASE/api/goals" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"name\":\"Smoke goal $$\",\"description\":\"created by the smoke test\"}")"
+    -d "{\"name\":\"Smoke goal ${RUN_ID}\",\"description\":\"created by the smoke test\"}")"
 goal_id="$(json_str "$goal" id)"
 if [ -n "$goal_id" ]; then
     pass "goal created"
@@ -883,7 +892,7 @@ check "an unknown scope is refused" "400" \
         -d '{"name":"broad","scopes":["everything"]}')"
 
 token_response="$("${CURL[@]}" -X POST "$BASE/api/service-tokens" -H "$AUTH" \
-    -H 'Content-Type: application/json' -d "{\"name\":\"smoke-scim-$$\",\"scopes\":[\"scim\"]}")"
+    -H 'Content-Type: application/json' -d "{\"name\":\"smoke-scim-${RUN_ID}\",\"scopes\":[\"scim\"]}")"
 token_id="$(json_str "$token_response" id)"
 token_secret="$(json_str "$token_response" secret)"
 contains "the secret is returned once" "$token_response" "pvt_"
@@ -907,18 +916,18 @@ contains "SCIM lists users in its own envelope" "$scim_list" "urn:ietf:params:sc
 
 scim_user="$("${CURL[@]}" -X POST "$BASE/scim/v2/Users" -H "$SCIM_AUTH" \
     -H 'Content-Type: application/scim+json' \
-    -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:User\"],\"userName\":\"scim_smoke_$$\",\"externalId\":\"idp-$$\",\"displayName\":\"SCIM Smoke\",\"emails\":[{\"value\":\"scim_smoke_$$@example.com\",\"primary\":true}],\"active\":true}")"
+    -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:User\"],\"userName\":\"scim_smoke_${RUN_ID}\",\"externalId\":\"idp-${RUN_ID}\",\"displayName\":\"SCIM Smoke\",\"emails\":[{\"value\":\"scim_smoke_${RUN_ID}@example.com\",\"primary\":true}],\"active\":true}")"
 scim_id="$(json_str "$scim_user" id)"
 contains "SCIM provisions an account" "$scim_user" "SCIM Smoke"
-contains "and echoes the external id"  "$scim_user" "idp-$$"
+contains "and echoes the external id"  "$scim_user" "idp-${RUN_ID}"
 
 # A provisioning client that retries must not create a duplicate.
 check "a repeated userName is a conflict" "409" \
     "$(status_of -X POST "$BASE/scim/v2/Users" -H "$SCIM_AUTH" -H 'Content-Type: application/scim+json' \
-        -d "{\"userName\":\"scim_smoke_$$\",\"active\":true}")"
+        -d "{\"userName\":\"scim_smoke_${RUN_ID}\",\"active\":true}")"
 
 contains "the filter every client sends works" \
-    "$("${CURL[@]}" -H "$SCIM_AUTH" "$BASE/scim/v2/Users?filter=userName%20eq%20%22scim_smoke_$$%22")" \
+    "$("${CURL[@]}" -H "$SCIM_AUTH" "$BASE/scim/v2/Users?filter=userName%20eq%20%22scim_smoke_${RUN_ID}%22")" \
     "SCIM Smoke"
 
 # An unsupported filter must be refused rather than quietly returning everyone.
@@ -976,12 +985,12 @@ check "an administrator cannot erase themselves" "400" \
         -H 'Content-Type: application/json' -d "{\"confirm\":\"$ADMIN_USER\"}")"
 
 erased="$(status_of -X POST "$BASE/api/users/$scim_id/erase" -H "$AUTH" \
-    -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_$$\"}")"
+    -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_${RUN_ID}\"}")"
 check "an administrator can erase an account" "200" "$erased"
 
 after_erasure="$("${CURL[@]}" -H "$AUTH" "$BASE/api/users/$scim_id")"
 contains "the account becomes a tombstone" "$after_erasure" "Deleted user"
-if printf '%s' "$after_erasure" | grep -q "scim_smoke_$$@example.com"; then
+if printf '%s' "$after_erasure" | grep -q "scim_smoke_${RUN_ID}@example.com"; then
     fail "identifiers are gone after erasure" "the original e-mail is still there"
 else
     pass "identifiers are gone after erasure"
@@ -995,7 +1004,7 @@ contains "the audit trail records the erasure" \
 # Repeating it must not rename the tombstone again.
 check "erasure is idempotent" "400" \
     "$(status_of -X POST "$BASE/api/users/$scim_id/erase" -H "$AUTH" \
-        -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_$$\"}")"
+        -H 'Content-Type: application/json' -d "{\"confirm\":\"scim_smoke_${RUN_ID}\"}")"
 
 # ---------------------------------------------------------------------------
 section "Single sign-on"
@@ -1062,6 +1071,54 @@ if printf '%s' "$metrics" | grep -q 'projectview_http_requests_total'; then
 else
     pass "metrics are not reachable from the public edge"
 fi
+
+# ---------------------------------------------------------------------------
+section "Roles and the last administrator"
+
+# Checked before the promotion below, because afterwards this account really
+# is an administrator and the assertion would be testing the wrong thing.
+# A member promoting themselves would make every other authorization check
+# decorative.
+check "a member cannot promote themselves" "403"     "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH"         -H 'Content-Type: application/json' -d '{"role":"admin"}')"
+check "the portfolio is closed to them" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/portfolio")"
+# Refused, not silently ignored: answering 200 while dropping the field tells
+# the caller a change was applied when it was not.
+check "a member cannot activate an account either" "403"     "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH"         -H 'Content-Type: application/json' -d '{"active":false}')"
+# The rest of the profile is still theirs to edit.
+check "but they can still edit their own profile" "200"     "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$MEMBER_AUTH"         -H 'Content-Type: application/json' -d '{"title":"Analyst"}')"
+
+# Promoting somebody is what the administration screen exists to do.
+promoted="$("${CURL[@]}" -X PUT "$BASE/api/users/$member_id" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"role":"admin"}')"
+contains "an administrator can promote somebody" "$promoted" '"role":"admin"'
+contains "the promotion is recorded"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=user.role_changed")" "user.role_changed"
+
+# The new role applies to the session they already hold. Authorization reads
+# the account on every request rather than trusting the role baked into the
+# token, so a promotion does not wait for the next sign-in - and neither does
+# a demotion, which is the half that matters.
+check "the promotion applies to the open session" "200"     "$(status_of -H "$MEMBER_AUTH" "$BASE/api/portfolio")"
+
+check "an unknown role is refused" "400"     "$(status_of -X PUT "$BASE/api/users/$member_id" -H "$AUTH"         -H 'Content-Type: application/json' -d '{"role":"superuser"}')"
+
+# With two administrators, either may be demoted.
+demoted="$("${CURL[@]}" -X PUT "$BASE/api/users/$member_id" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"role":"member"}')"
+contains "one of two administrators can be demoted" "$demoted" '"role":"member"'
+
+# And the demotion closes the door again, on the same session.
+check "the demotion applies just as fast" "403" "$(status_of -H "$MEMBER_AUTH" "$BASE/api/portfolio")"
+
+# And now the rule that matters: nothing may leave the installation with
+# nobody able to administer it. The path back from that is an UPDATE against
+# the database, which is not a recovery procedure anyone should be one
+# careless click away from.
+check "the last administrator cannot be demoted" "409"     "$(status_of -X PUT "$BASE/api/users/$me_id" -H "$AUTH"         -H 'Content-Type: application/json' -d '{"role":"member"}')"
+check "nor deactivated" "409"     "$(status_of -X PUT "$BASE/api/users/$me_id" -H "$AUTH"         -H 'Content-Type: application/json' -d '{"active":false}')"
+
+# The refusal must not be a blanket block on editing the account.
+check "the last administrator can still be edited" "200"     "$(status_of -X PUT "$BASE/api/users/$me_id" -H "$AUTH"         -H 'Content-Type: application/json' -d '{"title":"Administrator"}')"
+
+# Still an administrator after all that.
+contains "the account survived the attempts"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/auth/me")" '"role":"admin"'
 
 # ---------------------------------------------------------------------------
 section "System settings"

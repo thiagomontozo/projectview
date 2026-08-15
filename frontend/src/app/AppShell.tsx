@@ -115,6 +115,18 @@ export function AppShell() {
               screen they cannot use. */}
           {user?.role === 'admin' && (
             <NavLink
+              to="/admin/users"
+              className={({ isActive }) => clsx(styles.navLink, isActive && styles.navLinkActive)}
+            >
+              <span className={styles.navIcon}>
+                <Users size={17} />
+              </span>
+              {t('nav.adminUsers')}
+            </NavLink>
+          )}
+
+          {user?.role === 'admin' && (
+            <NavLink
               to="/admin/settings"
               className={({ isActive }) => clsx(styles.navLink, isActive && styles.navLinkActive)}
             >

@@ -373,3 +373,54 @@ export function useTestAD() {
         .then((r) => r.data)
   });
 }
+
+/* --- Administration: accounts --------------------------------------------------- */
+
+export interface NewUser {
+  username: string;
+  name: string;
+  email: string;
+  password: string;
+  role: 'admin' | 'manager' | 'member';
+}
+
+export function useCreateUser() {
+  const client = useQueryClient();
+  return useMutation({
+    // Account creation mints a role, so it is the same admin-only endpoint the
+    // API has always used rather than a second way in.
+    mutationFn: (body: NewUser) => api.post<User>('/auth/register', body).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.users })
+  });
+}
+
+export function useSetUserRole() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: NewUser['role'] }) =>
+      api.put<User>(`/users/${id}`, { role }).then((r) => r.data),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.users });
+      // Promoting or demoting yourself changes what your own session may do.
+      client.invalidateQueries({ queryKey: keys.me });
+    }
+  });
+}
+
+export function useSetUserActive() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      api.put<User>(`/users/${id}`, { active }).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.users })
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    // An administrator resets without the old password; the server revokes
+    // every session the account holds when it happens.
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      api.post(`/users/${id}/password`, { password })
+  });
+}
