@@ -29,8 +29,13 @@ void i18n
     },
     fallbackLng: 'pt-BR',
     supportedLngs: SUPPORTED_LANGUAGES.map((l) => l.code),
-    // "pt" and "pt-PT" should land on Portuguese rather than the fallback.
-    nonExplicitSupportedLngs: true,
+    // No nonExplicitSupportedLngs here, deliberately. It strips the region
+    // before checking supportedLngs, so "pt-BR" is tested as "pt" against a
+    // list that only holds "pt-BR" — no match, an empty language chain, and
+    // every label renders as its own key. English survived it because "en" is
+    // already region-less, which is why the bug only showed in Portuguese.
+    // "pt" and "pt-PT" reach Portuguese anyway: they are not in the list, so
+    // they fall through to fallbackLng, which is pt-BR.
     detection: {
       order: ['localStorage', 'navigator'],
       lookupLocalStorage: 'pv_language',
