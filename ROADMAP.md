@@ -14,16 +14,17 @@ Phase A1 PostgreSQL foundation       ██████████████�
 Phase A2 Domain, security, ops       ████████████████░░░░   80%   ✅
 Phase A3 Product engine              ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase B1 UI foundation               ████████████████████  100%   ✅
-Phase B2 Views                       ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
+Phase B2 Views                       ████████████████░░░░   80%   ✅
 Phase B3 Collaboration               ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
 Phase C  Intelligence & enterprise   ░░░░░░░░░░░░░░░░░░░░    0%   ⬜
                                      ─────────────────────
-                              overall  ~4 of 8 phases
+                              overall  ~5 of 8 phases
 ```
 
-The backend is a platform: hierarchical, auditable, revocable, searchable and
-observable. The frontend now has a foundation to match. What remains is
-**product surface** — the views and the features that sit on top.
+The product is now usable as a project management tool rather than a kanban
+board: the same tasks can be read as a list, a table, a calendar, a Gantt
+timeline or a capacity grid. What remains is depth — custom fields,
+dependencies, automations — and the collaboration surface.
 
 ---
 
@@ -187,6 +188,49 @@ to `HTMLDivElement` while being rendered as `li`.
 views worth driving end to end; today they would mostly re-test what the smoke
 test already covers.
 
+## ✅ Phase B2 — Views
+
+Six ways to read the same tasks, sharing one filter/group/sort model so a
+filter means the same thing everywhere.
+
+| View | What it is for |
+|---|---|
+| **Board** | Kanban, drag between columns (existing) |
+| **List** | Grouped by status, assignee or priority; virtualised, so ten thousand rows scroll |
+| **Table** | Spreadsheet-style inline editing of title, status, priority and due date |
+| **Calendar** | Month grid of tasks on their due dates |
+| **Timeline** | Gantt bars from start to due date, dragged to reschedule; zero-duration tasks render as milestone diamonds |
+| **Workload** | Capacity against allocation, per person, per week |
+
+**Shared model.** Filtering, grouping and sorting live in one pure module,
+which is what keeps the views honest with each other — and made them
+straightforward to test without a browser.
+
+**Decisions worth naming:**
+- Tasks with no due date sort **last** in both directions. Treating "no date"
+  as infinitely early buries everything that does have one.
+- A task assigned to two people appears under **both** in the grouped list.
+  Listing it only under the first would hide shared work from everyone else.
+- The workload view spreads a task's estimate across the days it spans instead
+  of charging it to the due date; eighty hours landing on one Friday would show
+  a spike that does not exist and hide the six weeks of load that do. Shared
+  tasks are split between assignees rather than double-counted, and unestimated
+  tasks contribute nothing — a default would make the view fiction.
+- Filters are deliberately **not** persisted across reloads, while the chosen
+  view is. Reopening a board to a filtered subset with no visible reason looks
+  like missing data.
+- Inline edits commit on blur or Enter, not per keystroke; Escape abandons.
+
+**Verified:** frontend tests grew from 18 to **33**, covering filter
+combination semantics (OR within a facet, AND across facets), the sort rules
+above, and the grouping behaviour. Type-check, production build and the
+107-assertion backend smoke test all pass.
+
+**Deferred to A3, with reason:** task **dependencies** and the **critical
+path** on the timeline. Both need backend modelling that does not exist yet —
+drawing dependency arrows over data the server cannot express would be a mock,
+not a feature.
+
 ---
 
 ## What is left
@@ -195,11 +239,6 @@ test already covers.
 Custom fields · task dependencies and critical path · time tracking ·
 recurring tasks · templates · attachments · watchers and mentions ·
 automation engine (trigger → condition → action) · signed webhooks · public API.
-
-### ⬜ Phase B2 — Views
-List, Table (inline editing), Calendar, Gantt (drag, dependencies, milestones,
-baseline), Timeline, Workload, Activity · saved views · virtualization ·
-bulk editing.
 
 ### ⬜ Phase B3 — Collaboration
 Rich-text editor and Docs · chat threads, reactions, mentions, attachments,
@@ -221,15 +260,16 @@ LGPD export and erasure · backup runbooks · HA.
 | M1 | Stack runs on Postgres; smoke test passes unchanged | ✅ |
 | M2 | Audit log covers mutations; RBAC matrix tested; sessions revocable | ✅ |
 | M3 | A 10k-task board renders under 100 ms p95 under load | ⬜ |
-| M4 | Gantt reorders dependencies and recomputes the critical path | ⬜ |
+| M4 | Gantt reorders dependencies and recomputes the critical path | 🚧 timeline ships; dependencies need A3 |
 | M5 | "Task overdue → notify assignee and change status" runs end to end | ⬜ |
 
 ## Effort
 
-Phases 0, A1, A2 and B1 are done. The remaining four are roughly **19
-person-weeks**, compressible to about 11–13 calendar weeks with the platform
+Phases 0, A1, A2, B1 and B2 are done. The remaining three are roughly **14
+person-weeks**, compressible to about 9–10 calendar weeks with the platform
 and product tracks running in parallel.
 
-**B2 is now the highest-value next step.** The foundation exists and the data
-is there; what is missing is the views — Gantt, Calendar, Table, Timeline,
-Workload — that turn a kanban board into a project management tool.
+**A3 is now the highest-value next step**, and it has become the bottleneck:
+the timeline is built but cannot draw dependencies, custom fields have nowhere
+to live, and there is no automation engine — all of which are backend work
+that the views are already waiting on.

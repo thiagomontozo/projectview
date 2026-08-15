@@ -202,6 +202,44 @@ export const Inbox = (p: IconProps) => (
   </Icon>
 );
 
+export const Calendar = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18M8 3v4M16 3v4" />
+  </Icon>
+);
+
+export const Table = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 10h18M3 15h18M9 4v16" />
+  </Icon>
+);
+
+export const Timeline = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 7h9M4 12h14M4 17h6" />
+  </Icon>
+);
+
+export const ArrowUp = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </Icon>
+);
+
+export const ArrowDown = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 5v14M18 13l-6 6-6-6" />
+  </Icon>
+);
+
+export const ChevronLeft = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m15 6-6 6 6 6" />
+  </Icon>
+);
+
 export const Command = (p: IconProps) => (
   <Icon {...p}>
     <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3Z" />

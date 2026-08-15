@@ -36,9 +36,14 @@ integrated with Active Directory. Fully containerized and served over HTTPS.
   30-day completion trend, and progress per project.
 - **Dashboard with draggable cards** — the landing dashboard is a grid of
   cards (KPIs + charts) that can be rearranged by drag-and-drop, with the
-  chosen order persisted per user in the browser. On top of that, every
-  project has a kanban board whose task cards drag between configurable
-  columns (`@dnd-kit`).
+  chosen order persisted per user in the browser.
+- **Six views over the same tasks** — every project can be seen as a **Board**
+  (kanban, drag between columns), a **List** (grouped and virtualised), a
+  **Table** (spreadsheet-style inline editing), a **Calendar**, a **Timeline**
+  (Gantt bars you drag to reschedule, with milestones), or a **Workload** grid
+  showing capacity against allocation per person per week. Filters, grouping
+  and sorting are shared across them, and the chosen view is remembered per
+  project. Multi-select supports bulk status and priority changes.
 - **PostgreSQL configurable via environment variable** (`DATABASE_URL`), with
   the **schema created automatically on first run** by migrations embedded in
   the binary, plus an admin user, a sample team and a sample project seeded
@@ -106,6 +111,8 @@ Internet
 | i18n | Bundled pt-BR and en dictionaries, browser detection, `<html lang>` kept in sync |
 | Keyboard | `Ctrl/Cmd+K` command palette that searches tasks through the server's full-text index, not a client-side filter |
 | States | Skeletons shaped like the content, distinct empty vs. error states, and an error boundary so one broken component cannot blank the app |
+| Views | Filtering, grouping and sorting live in one pure module ([useViewState.ts](frontend/src/views/useViewState.ts)) shared by every view, so a filter means the same thing in the table as on the board |
+| Large lists | The list view is virtualised with TanStack Virtual — group headers and rows are flattened into one array so a single virtualizer covers the whole list |
 - **Database** — PostgreSQL 16. The address is fully configurable through
   `DATABASE_URL` and can point at the bundled container or any other instance
   (RDS, Cloud SQL, on-prem, …). On first run the backend applies the migrations
@@ -380,6 +387,14 @@ projects/tasks/sub-tasks with resource allocation and dates, the kanban move
 and its `completedAt` handling, search and pagination, the audit trail, the
 dashboard aggregations, chat, the WebSocket upgrade, readiness, and the login
 rate limit. It cleans up the fixtures it creates.
+
+**Frontend tests** — 33 assertions over the pure view logic (filtering,
+sorting, grouping) and the accessibility contracts of the primitives:
+
+```bash
+cd frontend
+npm test
+```
 
 Among them are **authorization regression tests**: the script creates an
 ordinary member account and proves it cannot take over another account, read a
