@@ -101,7 +101,8 @@
     "noTasks": "Nenhuma tarefa",
     "addToColumn": "Adicionar em {{column}}",
     "moved": "Tarefa movida.",
-    "moveFailed": "Não foi possível mover a tarefa."
+    "moveFailed": "Não foi possível mover a tarefa.",
+    "loadMore": "Carregar mais ({{loaded}} de {{total}})"
   },
   "task": {
     "new": "Nova tarefa",
@@ -344,7 +345,9 @@
     "loadLight": "Folga",
     "loadFull": "Perto da capacidade",
     "loadOver": "Acima de {{capacity}}h/semana",
-    "criticalPath": "Caminho crítico"
+    "criticalPath": "Caminho crítico",
+    "showingOf": "Mostrando {{loaded}} de {{total}} tarefas.",
+    "loadMore": "Carregar mais"
   },
   "docs": {
     "title": "Documentos",

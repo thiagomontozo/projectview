@@ -135,7 +135,53 @@ byte-identical output.
 
 **Not fixed, and moved to 2.2 rather than folded in here:** the board itself.
 
-### 2.2 Move the board off the unbounded listing
+### ✅ 2.2 Move the board off the unbounded listing — done
+
+The board fetches **a page per kanban column** with a true total behind each,
+and every other view reads one paged stream that says how much of the project
+it is showing. **9.06 s → 483 ms p95**, and the same run now serves ten times
+the requests while every other endpoint gets faster beside it. Numbers in
+[ROADMAP.md](ROADMAP.md#m3--the-load-test-and-what-it-found).
+
+**The design question this item existed for, answered:** filtering, grouping
+and sorting moved **server-side**, not into a scoped notice. `/api/tasks` now
+takes repeated `status`, `priority` and `assigneeId` parameters (repeated means
+*or*), a `sort` from an allow-list, and an `offset`; a new
+`/projects/:id/tasks/counts` returns the per-column totals in one query. So a
+filter still means "everywhere in this project" rather than "within what
+happened to load" — which was the whole risk.
+
+Three rules moved out of the client's sort function and into SQL, because with
+only a page in hand the browser can no longer order what it cannot see:
+severity ordering for priority, the project's own column order for status, and
+unscheduled tasks sorting last in **either** direction. They are tested in
+`repo.taskOrderBy` now instead of `applyView`, which is deleted.
+
+**What is scoped rather than resolved, and says so:** grouping by assignee or
+priority in the list view still buckets what is loaded, and the calendar,
+timeline and workload views draw from the same page. Each shows "showing N of
+M" with a load-more, so no view claims completeness it does not have. Paging
+those by group is a smaller, separate change now that the server can count.
+
+**Offset, not a cursor**, and deliberately. A cursor anchors on the ordering it
+was built for; six sort options would mean six cursor encodings. Offset costs
+more the deeper it goes, which is the right trade for a column somebody expands
+a few times and the wrong one for scrolling a whole table — the cursor path is
+untouched for the search endpoint that uses it.
+
+**Two bugs found while doing it**, both invisible without the right test:
+
+- A nil Go slice reaches PostgreSQL as `NULL`, not as an empty array, so
+  `cardinality($3) = 0` evaluated to `NULL` rather than true. The guard failed
+  open into the filter and **every unfiltered listing returned zero rows**.
+  Nothing errored; the endpoints answered 200 and every board was empty.
+- Axios brackets array parameters, so `status[]=todo` reached a Go handler
+  reading `status`. Every column asked for its own status, none of them
+  applied, and **all five columns rendered the same unfiltered page**. Caught
+  by the browser suite from 1.3, and by nothing else — the API was answering
+  each request correctly.
+
+### 2.2 (original statement, kept for the reasoning)
 
 **This is what M3 is actually waiting on.** The evidence is measured, not
 argued: fetching a page per kanban column through `/api/tasks?projectId=&status=
@@ -308,25 +354,23 @@ doing only if somebody asks by name.
 
 ## Recommendation
 
-**2.2.** Priority 1 is empty: 1.1, 1.2 and 1.3 are all done, so the gaps that
-blocked ordinary use are closed and the pipeline can now see a screen.
+**3.2, then 3.3.** Priorities 1 and 2 are both empty.
 
-Done so far: an administrator can manage accounts from the interface and cannot
-accidentally leave the installation with nobody able to administer it (1.1,
-1.2); the browser suite runs on every push (1.3); the performance claims are
-measured rather than asserted (2.1); and people can attach files to their work
-(3.1).
+Done: account administration that cannot lock everybody out (1.1, 1.2); a
+browser suite on every push (1.3); performance measured rather than asserted
+(2.1); the board moved off the unbounded listing (2.2); and attachments (3.1).
 
-**2.2 is next, and the order is not arbitrary.** It rewrites how six views
-fetch their data, which is exactly the kind of change that used to reach users
-broken — and it is now the first substantial change this project has made with
-a browser suite standing behind it. Doing it before 3.2 and 3.3 also matters:
-recurring tasks and templates both generate rows into the same views, so
-adding volume before fixing how volume is fetched makes the problem 2.1 just
-measured worse.
+Recurring tasks and templates are next because they are what people ask for,
+and because the reason to hold them back is gone: both generate rows into the
+same views, and those views no longer load a whole project to show a screenful.
 
-One gap the new suite does not close, and worth stating plainly: attachments
-(3.1) shipped with a drag-and-drop target and an upload progress bar that
-nothing exercises in a browser. A file input that silently does nothing would
-still pass everything. It is small, and it belongs with whoever next touches
-that screen.
+**Three loose ends, none blocking, all small:**
+
+- Grouping by assignee or priority in the list view, and the calendar, timeline
+  and workload views, still draw from one loaded page. Each says so, and paging
+  them by group is a contained change now that the server can count.
+- The timeline returns every dependency in one response — 512 KB on a
+  2,000-edge project, and now the slowest endpoint in the load test.
+- Attachments shipped with a drag-and-drop target and an upload progress bar
+  that no browser test exercises. A file input that silently did nothing would
+  still pass everything.

@@ -179,6 +179,10 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Put("/{id}", api.UpdateProject)
 		r.Delete("/{id}", api.DeleteProject)
 		r.Get("/{projectId}/tasks", api.ListTasksForProject)
+		// How many tasks sit in each board column under the current filters,
+		// so a paged column can say "100 of 3,412" rather than implying it is
+		// showing everything.
+		r.Get("/{projectId}/tasks/counts", api.TaskCounts)
 		r.Post("/{projectId}/tasks", api.CreateTaskForProject)
 		// Everything the timeline needs to draw arrows and highlight the
 		// chain where a slip moves the end date.

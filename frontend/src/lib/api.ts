@@ -4,7 +4,18 @@ export const TOKEN_STORAGE_KEY = 'pv_token';
 
 export const api: AxiosInstance = axios.create({
   baseURL: '/api',
-  withCredentials: true
+  withCredentials: true,
+  /**
+   * Repeat a parameter rather than bracket it: `?status=todo&status=done`, not
+   * `?status[]=todo`.
+   *
+   * Axios brackets array parameters by default, and Go's net/http reads the
+   * literal key — so `status[]` arrives as a parameter nothing looks at, and
+   * every array filter is silently dropped. The board went out with each of its
+   * five columns showing the same unfiltered page because of exactly this: no
+   * error, no warning, just a filter that was never applied.
+   */
+  paramsSerializer: { indexes: null }
 });
 
 export function getToken(): string | null {

@@ -101,7 +101,8 @@
     "noTasks": "No tasks",
     "addToColumn": "Add to {{column}}",
     "moved": "Task moved.",
-    "moveFailed": "Could not move the task."
+    "moveFailed": "Could not move the task.",
+    "loadMore": "Load more ({{loaded}} of {{total}})"
   },
   "task": {
     "new": "New task",
@@ -344,7 +345,9 @@
     "loadLight": "Has room",
     "loadFull": "Near capacity",
     "loadOver": "Over {{capacity}}h/week",
-    "criticalPath": "Critical path"
+    "criticalPath": "Critical path",
+    "showingOf": "Showing {{loaded}} of {{total}} tasks.",
+    "loadMore": "Load more"
   },
   "docs": {
     "title": "Docs",

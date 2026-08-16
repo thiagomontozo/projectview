@@ -172,18 +172,60 @@ func (r *Tasks) ByProject(ctx context.Context, projectID uuid.UUID) ([]models.Ta
 }
 
 // TaskQuery describes a filtered, searchable, paginated task listing.
+//
+// The filters are slices rather than single values because that is what the
+// views ask for: "show me urgent and high", "show me Ana's and Bruno's". An
+// empty slice means no constraint, so the zero value is still "everything".
 type TaskQuery struct {
-	ProjectID  *uuid.UUID
-	AssigneeID *uuid.UUID
-	Status     string
-	Priority   string
-	ParentOnly bool // exclude sub-tasks
-	Overdue    bool
-	Search     string
+	ProjectID   *uuid.UUID
+	AssigneeIDs []uuid.UUID
+	Statuses    []string
+	Priorities  []string
+	ParentOnly  bool // exclude sub-tasks
+	Overdue     bool
+	Search      string
+
+	// SortColumn is a SQL expression, never a caller-supplied string: it comes
+	// from the allow-list in SortableTaskColumns, so the ORDER BY clause cannot
+	// be steered from the query string.
+	SortColumn string
+	SortDesc   bool
+
 	// Cursor anchors on (created_at, id) of the last row of the previous page.
+	// Only meaningful for the default ordering; see Offset.
 	CursorTime *time.Time
 	CursorID   *uuid.UUID
-	Limit      int
+	// Offset pages a result set ordered by something other than created_at.
+	//
+	// A cursor anchors on the sort key, so it only works for the ordering it
+	// was designed around; supporting six sort fields would mean six cursor
+	// encodings. Offset is used instead, and the trade-off is deliberate rather
+	// than overlooked: its cost grows with depth, which matters when scrolling
+	// a whole table and does not when a board column loads another hundred
+	// cards. The cursor path is untouched for the callers that use it.
+	Offset int
+	Limit  int
+}
+
+// SortableTaskColumns maps the sort names a client may ask for onto the SQL
+// that implements them. Nothing outside this map reaches an ORDER BY.
+//
+// Two of these encode a rule the interface already had and the database does
+// not know about, and they are here so the server and the client agree rather
+// than each sorting its own way:
+//
+//   - priority orders by severity, not alphabetically, so "urgent" leads.
+//   - status follows the project's own column order, so a board sorted by
+//     status matches the columns it is drawn in.
+var SortableTaskColumns = map[string]string{
+	"position": "t.position",
+	"title":    "t.title",
+	"dueDate":  "t.due_date",
+	"created":  "t.created_at",
+	"priority": `CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
+	                             WHEN 'medium' THEN 2 ELSE 3 END`,
+	"status": `(SELECT ps.position FROM project_statuses ps
+	             WHERE ps.project_id = t.project_id AND ps.key = t.status)`,
 }
 
 // Search returns a page of tasks matching the query, newest first.
@@ -196,47 +238,125 @@ func (r *Tasks) Search(ctx context.Context, q TaskQuery) ([]models.Task, error) 
 		limit = 50
 	}
 
+	// The ordering and the paging clause are built rather than parameterised,
+	// because neither can be a bind variable. Both are assembled only from the
+	// allow-list and from integers, so nothing a caller sends reaches the SQL
+	// as text.
+	order := taskOrderBy(q.SortColumn, q.SortDesc)
+
+	// Offset applies whatever the ordering is. Tying it to a custom sort, as
+	// the first draft did, meant an unsorted listing silently ignored it and
+	// returned page one forever.
+	paging := fmt.Sprintf("LIMIT %d", limit+1)
+	if q.Offset > 0 {
+		paging = fmt.Sprintf("LIMIT %d OFFSET %d", limit+1, q.Offset)
+	}
+
 	// websearch_to_tsquery accepts what a person would actually type -
 	// quoted phrases, "or", leading "-" to exclude - and never errors on
 	// malformed input, unlike to_tsquery.
 	return r.collect(ctx, `
 		SELECT `+taskColumns+`
 		  FROM tasks t
-		 WHERE ($1::uuid IS NULL OR t.project_id = $1)
-		   AND ($2::uuid IS NULL OR EXISTS (
-		         SELECT 1 FROM task_assignees ta
-		          WHERE ta.task_id = t.id AND ta.user_id = $2))
-		   AND ($3::text = '' OR t.status = $3)
-		   AND ($4::text = '' OR t.priority = $4)
-		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
-		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
-		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))
+		 WHERE `+taskFilterSQL+`
 		   AND ($8::timestamptz IS NULL
 		        OR t.created_at < $8
 		        OR (t.created_at = $8 AND t.id < $9::uuid))
-		 ORDER BY t.created_at DESC, t.id DESC
-		 LIMIT $10`,
-		q.ProjectID, q.AssigneeID, q.Status, q.Priority, q.ParentOnly, q.Overdue,
-		q.Search, q.CursorTime, q.CursorID, limit+1)
+		 ORDER BY `+order+`
+		 `+paging,
+		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities, q.ParentOnly, q.Overdue,
+		q.Search, q.CursorTime, q.CursorID)
 }
 
+// taskOrderBy builds the ORDER BY clause.
+//
+// Pure and separate so the two rules it encodes can be asserted without a
+// database. Both used to live in the client's sort function and moved here when
+// paging did: with only a page in hand, the client can no longer order what it
+// cannot see, and a rule enforced in one place and not the other would make the
+// first page of a sort disagree with the second.
+//
+//   - NULLS LAST in *both* directions. PostgreSQL puts them first when
+//     descending, and the rule the views have always followed is that a task
+//     with no due date is unscheduled rather than infinitely early.
+//   - The id breaks ties, so the order is total. Without it two tasks of equal
+//     priority could swap places between requests, and "load more" would repeat
+//     one row and skip another.
+func taskOrderBy(column string, desc bool) string {
+	if column == "" {
+		// The legacy ordering, which the cursor pagination anchors on.
+		return "t.created_at DESC, t.id DESC"
+	}
+	direction := "ASC"
+	if desc {
+		direction = "DESC"
+	}
+	return fmt.Sprintf("%s %s NULLS LAST, t.id ASC", column, direction)
+}
+
+// taskFilterSQL is the WHERE body shared by the listing and its count, so the
+// two can never drift into disagreeing about what "matching" means - which
+// would show a total that the pages beneath it never add up to.
+//
+// An empty filter means "no constraint" rather than "match nothing", so the
+// zero value of TaskQuery still selects everything.
+//
+// COALESCE around cardinality is load-bearing, not defensive. A nil Go slice
+// arrives as SQL NULL rather than as an empty array, and cardinality(NULL) is
+// NULL - so a bare "cardinality(...) = 0" evaluates to NULL, which is not true,
+// the guard fails open into the filter, and every unfiltered listing matches
+// nothing. Coalescing to 0 is what makes "no filter" mean no filter.
+const taskFilterSQL = `
+		       ($1::uuid IS NULL OR t.project_id = $1)
+		   AND (COALESCE(cardinality($2::uuid[]), 0) = 0 OR EXISTS (
+		         SELECT 1 FROM task_assignees ta
+		          WHERE ta.task_id = t.id AND ta.user_id = ANY($2)))
+		   AND (COALESCE(cardinality($3::text[]), 0) = 0 OR t.status = ANY($3))
+		   AND (COALESCE(cardinality($4::text[]), 0) = 0 OR t.priority = ANY($4))
+		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
+		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
+		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))`
+
 // CountMatching reports how many tasks match, ignoring pagination.
+//
+// This is what makes "load more" honest: a column that shows its first hundred
+// cards has to be able to say how many there are, or the interface is hiding
+// work while looking complete.
 func (r *Tasks) CountMatching(ctx context.Context, q TaskQuery) (int64, error) {
 	var n int64
 	err := r.store.Pool.QueryRow(ctx, `
-		SELECT count(*)
-		  FROM tasks t
-		 WHERE ($1::uuid IS NULL OR t.project_id = $1)
-		   AND ($2::uuid IS NULL OR EXISTS (
-		         SELECT 1 FROM task_assignees ta
-		          WHERE ta.task_id = t.id AND ta.user_id = $2))
-		   AND ($3::text = '' OR t.status = $3)
-		   AND ($4::text = '' OR t.priority = $4)
-		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
-		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
-		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))`,
-		q.ProjectID, q.AssigneeID, q.Status, q.Priority, q.ParentOnly, q.Overdue, q.Search).Scan(&n)
+		SELECT count(*) FROM tasks t WHERE `+taskFilterSQL,
+		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities,
+		q.ParentOnly, q.Overdue, q.Search).Scan(&n)
 	return n, err
+}
+
+// CountByStatus returns how many tasks match in each status, in one query.
+//
+// The board needs a total per column, and asking for them one at a time would
+// be a query per column on every load - the shape this whole change exists to
+// remove.
+func (r *Tasks) CountByStatus(ctx context.Context, q TaskQuery) (map[string]int64, error) {
+	rows, err := r.store.Pool.Query(ctx, `
+		SELECT t.status, count(*) FROM tasks t WHERE `+taskFilterSQL+`
+		 GROUP BY t.status`,
+		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities,
+		q.ParentOnly, q.Overdue, q.Search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int64{}
+	for rows.Next() {
+		var status string
+		var n int64
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		out[status] = n
+	}
+	return out, rows.Err()
 }
 
 func (r *Tasks) AssignedTo(ctx context.Context, userID uuid.UUID) ([]models.Task, error) {

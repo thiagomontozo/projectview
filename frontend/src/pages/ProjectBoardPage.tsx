@@ -15,8 +15,17 @@ import { TableView } from '../views/TableView';
 import { CalendarView } from '../views/CalendarView';
 import { TimelineView } from '../views/TimelineView';
 import { WorkloadView } from '../views/WorkloadView';
-import { applyView, useViewState } from '../views/useViewState';
-import { useMoveTask, useProject, useProjectTasks, useSaveTask, useSchedule, useUsers } from '../lib/queries';
+import { useViewState } from '../views/useViewState';
+import {
+  pagedTasks,
+  useMoveTask,
+  useProject,
+  useProjectTaskPage,
+  useSaveTask,
+  useSchedule,
+  useTaskCounts,
+  useUsers
+} from '../lib/queries';
 import { statusOf } from '../lib/api';
 import type { Task } from '../types';
 
@@ -33,7 +42,6 @@ export default function ProjectBoardPage() {
   const view = useViewState(id);
 
   const project = useProject(id);
-  const tasks = useProjectTasks(id);
   const { data: allUsers = [] } = useUsers();
   // Only the timeline draws arrows, so the schedule is not fetched for the
   // other views.
@@ -41,23 +49,33 @@ export default function ProjectBoardPage() {
   const moveTask = useMoveTask();
   const saveTask = useSaveTask();
 
+  // Totals per column, under whatever filters are applied. The board needs
+  // them to say "100 of 3,412" rather than implying the hundred is all there
+  // is; the other views use the sum for the same reason.
+  const counts = useTaskCounts(id, view.state.filters);
+
+  // Every view except the board reads one paged stream rather than a page per
+  // column. The board does not use this - its columns fetch their own - so it
+  // is disabled there instead of being fetched and thrown away.
+  const flat = useProjectTaskPage(id, {
+    filters: view.state.filters,
+    sortBy: view.state.sortBy,
+    sortDirection: view.state.sortDirection,
+    enabled: view.state.kind !== 'board'
+  });
+  const { tasks: visible, total, loaded } = pagedTasks(flat.data);
+  // True when what is on screen is a subset of what matches. Every view that
+  // aggregates - the calendar, the timeline, the workload grid - has to say so,
+  // because a chart drawn from part of the data looks exactly like a chart
+  // drawn from all of it.
+  const partial = total > loaded;
+
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const columns = useMemo(
     () => (project.data?.statuses ?? []).slice().sort((a, b) => a.order - b.order),
     [project.data]
-  );
-
-  // Sub-tasks live inside their parent's detail view, not as top-level rows.
-  const topLevel = useMemo(
-    () => (tasks.data ?? []).filter((task) => !task.parentTask),
-    [tasks.data]
-  );
-
-  const visible = useMemo(
-    () => applyView(topLevel, view.state, columns.map((column) => column.key)),
-    [topLevel, view.state, columns]
   );
 
   // Members of the project, falling back to everyone when the project keeps
@@ -147,14 +165,39 @@ export default function ProjectBoardPage() {
         onClearFilters={view.clearFilters}
       />
 
-      {tasks.isLoading ? (
+      {/* Every view below the board draws from a page rather than the whole
+          project, so it says what it is showing. The board says it per column
+          instead, where the missing cards actually are. */}
+      {view.state.kind !== 'board' && partial && (
+        <p
+          role="status"
+          style={{
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-secondary)',
+            marginBottom: 'var(--space-3)'
+          }}
+        >
+          {t('views.showingOf', { loaded, total })}{' '}
+          {flat.hasNextPage && (
+            <Button variant="ghost" size="sm" loading={flat.isFetchingNextPage} onClick={() => void flat.fetchNextPage()}>
+              {t('views.loadMore')}
+            </Button>
+          )}
+        </p>
+      )}
+
+      {view.state.kind !== 'board' && flat.isLoading ? (
         <SkeletonList rows={4} height={64} label={t('common.loading')} />
       ) : (
         <>
           {view.state.kind === 'board' && (
             <KanbanBoard
+              projectId={project.data.id}
               columns={columns}
-              tasks={visible}
+              filters={view.state.filters}
+              sortBy={view.state.sortBy}
+              sortDirection={view.state.sortDirection}
+              counts={counts.data?.byStatus}
               onOpenTask={(task) => setModal({ task })}
               onAddTask={(statusKey) => setModal({ defaultStatus: statusKey })}
               onMove={(taskId, status, order) =>

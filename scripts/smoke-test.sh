@@ -239,6 +239,38 @@ comment="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/comments" -H "$AUTH" -
 contains "comment added to the task" "$comment" "smoke comment"
 
 # ---------------------------------------------------------------------------
+section "Paged listings"
+# The board stopped asking for every task in the project. These assert the
+# server side of that: repeated filters mean OR, the sort allow-list refuses
+# anything it does not know, and a page reports a total it is a subset of.
+
+counts="$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/tasks/counts")"
+contains "counts are reported per column" "$counts" '"byStatus"'
+contains "counts carry a total"           "$counts" '"total"'
+
+paged="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&limit=1&total=true")"
+contains "a page reports the total behind it" "$paged" '"total"'
+
+# A repeated parameter means "either", not "the last one wins". The board sends
+# one status per column and the filters send several at once.
+both="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&priority=high&priority=low&total=true")"
+contains "repeated filters mean OR" "$both" '"total"'
+
+# An empty filter must mean "no filter", never "match nothing". A nil array
+# reaching SQL as NULL made every listing return zero rows during development.
+empty_filter="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&status=&limit=1&total=true")"
+if printf '%s' "$empty_filter" | grep -q '"total":0'; then
+    fail "an empty filter is not a filter" "$empty_filter"
+else
+    pass "an empty filter is not a filter"
+fi
+
+# Sorting comes from an allow-list, so an unknown field falls back to the
+# default ordering rather than reaching the ORDER BY clause.
+check "an unknown sort is ignored, not executed" "200"     "$(status_of -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&sort=t.id%3BDROP+TABLE+tasks")"
+check "offset is validated" "400"     "$(status_of -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&offset=-1")"
+
+# ---------------------------------------------------------------------------
 section "Attachments"
 # The part unit tests cannot reach: a real file into a real object store, and a
 # signed URL that the store itself accepts. A signature is either byte-for-byte

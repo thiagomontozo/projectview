@@ -33,6 +33,8 @@ const PASSWORD = __ENV.ADMIN_PASS || 'ChangeMe123!';
 // evidence.
 const PROFILE = __ENV.PROFILE || 'unbounded';
 const PAGE_SIZE = Number(__ENV.PAGE_SIZE || 100);
+// The fixture's project uses these four; a real project's columns come from
+// project_statuses and the board asks for whichever it has.
 const COLUMNS = ['todo', 'in_progress', 'review', 'done'];
 const THINK_SECONDS = Number(__ENV.THINK_SECONDS || 1);
 const VUS = Number(__ENV.VUS || 10);
@@ -98,20 +100,22 @@ export default function (data) {
 
   group('board', () => {
     if (PROFILE === 'paginated') {
-      // What the board would cost if it fetched a page per kanban column
-      // through the paginated endpoint that already exists, instead of asking
-      // for every task in the project. Measured rather than asserted, so the
-      // recommendation in the backlog rests on a number.
+      // Exactly what the board issues on first paint since it moved off the
+      // unbounded listing: one page per kanban column, plus the counts that let
+      // each column say "100 of 3,412".
       //
-      // The slowest column is what the page waits on, since a browser issues
-      // the four in parallel - summing them would describe a client nobody
-      // writes.
+      // The slowest request is what the page waits on, because a browser issues
+      // them in parallel - summing them would describe a client nobody writes.
       let slowest = 0;
-      for (const status of COLUMNS) {
-        const res = http.get(
-          `${BASE}/api/tasks?projectId=${PROJECT_ID}&status=${status}&limit=${PAGE_SIZE}`,
-          params
-        );
+      const requests = COLUMNS.map(
+        (status) =>
+          `${BASE}/api/tasks?projectId=${PROJECT_ID}&status=${status}` +
+          `&topLevel=true&limit=${PAGE_SIZE}&total=true&sort=position`
+      );
+      requests.push(`${BASE}/api/projects/${PROJECT_ID}/tasks/counts?topLevel=true`);
+
+      for (const url of requests) {
+        const res = http.get(url, params);
         slowest = Math.max(slowest, res.timings.duration);
         check(res, { 'column 200': (r) => r.status === 200 });
       }
@@ -129,7 +133,7 @@ export default function (data) {
     // is a distinct page and would be the first place a regression shows.
     const url =
       PROFILE === 'paginated'
-        ? `${BASE}/api/tasks?projectId=${PROJECT_ID}&limit=${PAGE_SIZE}`
+        ? `${BASE}/api/tasks?projectId=${PROJECT_ID}&topLevel=true&limit=${PAGE_SIZE}&total=true&sort=position`
         : `${BASE}/api/projects/${PROJECT_ID}/tasks`;
     const res = http.get(url, params);
     list.add(res.timings.duration);

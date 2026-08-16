@@ -483,22 +483,38 @@ tags, 6,000 checklist items, 2,500 comments and 2,000 dependencies arranged as
 chains and diamonds so the critical-path walk is actually exercised — then k6
 at 10 concurrent users with one second of think time.
 
-**The milestone is not met.** The numbers, rather than an adjective:
+**The board has since been moved off the unbounded listing** (BACKLOG 2.2); both
+columns below are measured, the first against the shape that shipped before it.
 
-| Endpoint | p95 today | p95 paginated | Isolated, one request |
+| Endpoint | p95 before | p95 now | Isolated, one request |
 |---|---|---|---|
-| Board (`/projects/:id/tasks`) | **9.06 s** | 442 ms | 1.6 s |
-| List (same collection) | **8.88 s** | 296 ms | 1.6 s |
-| Search (`/tasks?q=`) | 748 ms | 218 ms | **49 ms** ✅ |
-| Timeline (`/projects/:id/schedule`) | 1.12 s | 750 ms | 181 ms |
-| Workload (`/users/workload`) | 698 ms | 459 ms | 118 ms |
-| Data transferred over the run | 814 MB | 264 MB | — |
+| Board (`/projects/:id/tasks` → a page per column) | **9.06 s** | **483 ms** | 126 ms |
+| List (same collection) | **8.88 s** | 312 ms | 52 ms |
+| Search (`/tasks?q=`) | 748 ms | 249 ms | **49 ms** ✅ |
+| Timeline (`/projects/:id/schedule`) | 1.12 s | 755 ms | 181 ms |
+| Workload (`/users/workload`) | 698 ms | 249 ms | 118 ms |
+| Data transferred over the run | 814 MB | 256 MB | — |
+| Requests served in the run | 196 | **2,017** | — |
 
-**The board is the whole finding, and it is not an indexing problem.** The main
-query is 130 ms; the response is **10.1 MB**, because the endpoint returns every
-task in the project fully hydrated — 1,010 bytes each, times ten thousand. No
-index and no field-trimming rescues that: even a maximally trimmed card object
-would be several megabytes. The only fix is to stop asking for all of them.
+The last row is the one worth reading twice: the same ten users now get through
+**ten times as many requests**, and every endpoint is faster while doing it —
+including the three nobody touched. That is what removing a 10 MB response from
+the process does.
+
+**M3's literal threshold is still not met.** A board page in isolation is
+126 ms against a 100 ms target, and 483 ms under a mix of ten users
+continuously driving six endpoints with no pause. The gap went from roughly
+ninety times to under five, and what remains is dominated by the timeline
+(512 KB of dependencies in one response) and by a synthetic load heavier than
+a board page in use. Called unmet rather than rounded up, because the number
+is the number.
+
+**The board was the whole finding, and it was not an indexing problem.** The
+main query is 130 ms; the response was **10.1 MB**, because the endpoint
+returned every task in the project fully hydrated — 1,010 bytes each, times ten
+thousand. No index and no field-trimming rescues that: even a maximally trimmed
+card object would be several megabytes. The only fix was to stop asking for all
+of them, which is what 2.2 did.
 
 **Two things the run settles that were previously assertions:**
 
@@ -511,25 +527,23 @@ would be several megabytes. The only fix is to stop asking for all of them.
   any of them — search 748 → 218 ms, workload 698 → 459 ms — while the run
   serves **nine times more requests** (1,825 against 196).
 
-The "paginated" column is measured, not projected: it fetches a page per kanban
-column through `/api/tasks?projectId=&status=&limit=100`, the paginated endpoint
-that **already exists and is already fast**. The board page simply never moved
-onto it — which the comment on `SearchTasks` half-predicted, describing itself
-as the replacement for "the return-every-row behaviour the other listings had".
-Closing that is [BACKLOG 2.2](BACKLOG.md), scoped there, because the obstacle is
-not the query: it is that filtering, grouping and sorting live in one client-side
-module shared by six views, and server-side paging changes what a filter means.
+**Two bugs the measurement itself surfaced, both fixed:**
 
-**Fixed on the way:** the capacity report ran a correlated subquery per
-assignment — "how many people share this task", 10,002 executions — and scanned
-the whole tasks table once per person. One pass with a window function instead:
-**403 ms → 150 ms**, byte-identical output.
+- The capacity report ran a correlated subquery per assignment — "how many
+  people share this task", 10,002 executions — and scanned the whole tasks
+  table once per person. One pass with a window function instead: **403 ms →
+  150 ms**, byte-identical output.
+- The fixture had status and priority on the same stride, so every status
+  carried exactly one priority. A query honouring one filter and ignoring the
+  other would have returned identical rows, and the fixture would have agreed
+  with either. Decorrelated.
 
-**Not met, and honestly so:** even paginated, the board is 442 ms p95 rather
-than 100 ms at this concurrency, with the remaining cost dominated by the
-timeline (512 KB of dependencies) and the workload aggregation. Both are named
-in the backlog. A single board page in isolation is ~100 ms, so the target is
-reachable, but not while four other unbounded reports run beside it.
+**And one the browser suite caught in the fix**, which nothing else would have:
+axios brackets array parameters, so `status=['todo']` went out as `status[]=todo`
+and Go's `net/http` read the literal key. Every column asked for a different
+status, none of the filters applied, and all five columns rendered the same
+unfiltered page. No error, no warning — just five identical columns, which is
+precisely the class of defect the 1.3 suite was added for.
 
 ## Effort
 

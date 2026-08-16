@@ -723,15 +723,15 @@ in [ROADMAP.md](ROADMAP.md#m3--the-load-test-and-what-it-found).**
 Measured rather than guessed, and named here rather than left for somebody to
 discover:
 
-- **A single very large project will feel the board.**
-  `GET /api/projects/:id/tasks` returns every task in the project in one
-  response — measured at 10,000 tasks: 10.1 MB, 1.6 s on its own and about
-  nine seconds under concurrent use. Cost is linear in the task count, so a
-  project of a thousand costs about a tenth of that; the point where it stops
-  being comfortable is somewhere in between, and that part is arithmetic rather
-  than measurement. The fix is scoped as [BACKLOG 2.2](BACKLOG.md); the
-  paginated endpoint it needs already exists and answers a kanban column in
-  under 130 ms.
+- **The board pages, and says what it is not showing.** Each kanban column
+  fetches a hundred cards with the real total beside it, so a 10,000-task
+  project loads in about 130 ms rather than shipping 10.1 MB and taking nine
+  seconds. Filtering, grouping and sorting are resolved in SQL, so a filter
+  means "everywhere in this project" rather than "within what loaded".
+- **Some views still draw from one page**, and each says so with a
+  "showing N of M". Grouping by assignee in the list view, and the calendar,
+  timeline and workload views, arrange what is loaded rather than the whole
+  project.
 - **Search, by contrast, holds.** Full-text over 10,000 tasks answers a page of
   50 in 49 ms, which is what the `tsvector` column and its GIN index were built
   for.

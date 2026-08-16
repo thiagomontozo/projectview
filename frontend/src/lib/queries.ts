@@ -1,5 +1,6 @@
 import {
   QueryClient,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -76,6 +77,8 @@ export const keys = {
   projects: ['projects'] as const,
   project: (id: string) => ['projects', id] as const,
   projectTasks: (id: string) => ['projects', id, 'tasks'] as const,
+  projectTaskPage: (id: string, group: string) => ['projects', id, 'tasks', 'page', group] as const,
+  taskCounts: (id: string) => ['projects', id, 'tasks', 'counts'] as const,
   task: (id: string) => ['tasks', id] as const,
   myTasks: ['tasks', 'mine'] as const,
   taskSearch: (query: string) => ['tasks', 'search', query] as const,
@@ -218,10 +221,140 @@ export function useCreateProject() {
 
 /* --- Tasks --------------------------------------------------------------------- */
 
-export function useProjectTasks(projectId: string | undefined) {
+/* --- Paged project tasks ------------------------------------------------------
+ *
+ * The board used to load every task in the project in one request. Measured at
+ * 10,000 tasks that was 10.1 MB and nine seconds, and it saturated the backend
+ * badly enough to slow every other screen down beside it (see the M3 section of
+ * ROADMAP.md). These hooks replace that with a bounded page, and push the
+ * filters, the sort and the grouping to the server so a filter still means
+ * "everywhere in this project" rather than "within what happened to load".
+ * ---------------------------------------------------------------------------- */
+
+/** How many tasks one request fetches. */
+export const TASK_PAGE_SIZE = 100;
+
+/** Serialises the view's filter and sort state into server query parameters. */
+export function taskQueryParams(
+  projectId: string,
+  options: {
+    filters?: Partial<TaskFilterInput>;
+    sortBy?: string;
+    sortDirection?: 'asc' | 'desc';
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Record<string, unknown> {
+  const { filters = {}, sortBy, sortDirection, status, limit, offset } = options;
+
+  return {
+    projectId,
+    // Sub-tasks belong inside their parent, never as rows of their own. Done
+    // server-side now: filtering them out after the fact would make a page of
+    // a hundred arrive as sixty and the counts disagree with the rows.
+    topLevel: true,
+    // A column's own status wins over the filter, since the filter is what
+    // decides which columns are drawn at all.
+    status: status ? [status] : filters.status,
+    priority: filters.priority,
+    assigneeId: filters.assignees,
+    overdue: filters.overdueOnly ? 'true' : undefined,
+    q: filters.search?.trim() || undefined,
+    sort: sortBy ? `${sortDirection === 'desc' ? '-' : ''}${sortBy}` : undefined,
+    limit: limit ?? TASK_PAGE_SIZE,
+    offset: offset || undefined,
+    total: 'true'
+  };
+}
+
+export interface TaskFilterInput {
+  search: string;
+  status: string[];
+  priority: string[];
+  assignees: string[];
+  overdueOnly: boolean;
+}
+
+export interface TaskPageOptions {
+  filters: TaskFilterInput;
+  sortBy: string;
+  sortDirection: 'asc' | 'desc';
+  /** Restricts to one board column. */
+  status?: string;
+  enabled?: boolean;
+}
+
+/**
+ * A project's tasks, one page at a time.
+ *
+ * An infinite query rather than a growing `limit`, because the server caps a
+ * single page at 200 rows: asking for 300 would quietly return 200 while the
+ * column kept offering "load more" and never grew. Pages are fetched by offset
+ * and concatenated here.
+ *
+ * Offset rather than a cursor because the sort is the reader's choice. A cursor
+ * anchors on the ordering it was built for, so six sort options would mean six
+ * cursor encodings; offset costs more the deeper it goes, which is the right
+ * trade for a column somebody expands a few times and would be the wrong one
+ * for scrolling a whole table.
+ */
+export function useProjectTaskPage(projectId: string | undefined, options: TaskPageOptions) {
+  const { filters, sortBy, sortDirection, status, enabled = true } = options;
+
+  const params = taskQueryParams(projectId ?? '', { filters, sortBy, sortDirection, status });
+
+  return useInfiniteQuery({
+    queryKey: [...keys.projectTaskPage(projectId ?? '', status ?? 'all'), params],
+    queryFn: ({ pageParam }) => get<Page<Task>>('/tasks', { ...params, offset: pageParam || undefined }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.hasMore ? allPages.length * TASK_PAGE_SIZE : undefined,
+    enabled: enabled && Boolean(projectId)
+  });
+}
+
+/** Flattens an infinite query into the rows and the honest total behind them. */
+export function pagedTasks(data: { pages: Page<Task>[] } | undefined): {
+  tasks: Task[];
+  total: number;
+  loaded: number;
+} {
+  const pages = data?.pages ?? [];
+  const tasks = pages.flatMap((page) => page.items);
+  return {
+    tasks,
+    // The server's count, not the number of rows in hand: a column showing a
+    // hundred of three thousand has to be able to say so.
+    total: pages[0]?.total ?? tasks.length,
+    loaded: tasks.length
+  };
+}
+
+export interface TaskCounts {
+  byStatus: Record<string, number>;
+  total: number;
+}
+
+/**
+ * How many tasks each column holds under the current filters.
+ *
+ * Fetched apart from the pages because it answers a different question and
+ * changes less often: the columns re-fetch as somebody loads more, while these
+ * totals only move when the work does.
+ */
+export function useTaskCounts(projectId: string | undefined, filters: TaskFilterInput) {
+  const params = taskQueryParams(projectId ?? '', { filters });
+  // The status filter is what decides which columns are shown, so it must not
+  // also constrain their counts - a filtered-out column reads "0" rather than
+  // disappearing, which looks like empty work rather than a hidden column.
+  delete params.status;
+  delete params.limit;
+  delete params.offset;
+
   return useQuery({
-    queryKey: keys.projectTasks(projectId ?? ''),
-    queryFn: () => get<Task[]>(`/projects/${projectId}/tasks`),
+    queryKey: [...keys.taskCounts(projectId ?? ''), params],
+    queryFn: () => get<TaskCounts>(`/projects/${projectId}/tasks/counts`, params),
     enabled: Boolean(projectId)
   });
 }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Task } from '../types';
-import { isOverdue } from '../lib/format';
 
 export type ViewKind = 'board' | 'list' | 'table' | 'calendar' | 'timeline' | 'workload';
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority';
@@ -115,48 +114,20 @@ export function useViewState(projectId: string | undefined) {
   return { state, setKind, setGroupBy, setSort, setFilters, clearFilters, activeFilterCount };
 }
 
-const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-
-/** Applies the filters, then the sort. Pure, so it is straightforward to test. */
-export function applyView(tasks: Task[], state: ViewState, statusOrder: string[]): Task[] {
-  const { search, status, priority, assignees, overdueOnly } = state.filters;
-  const needle = search.trim().toLowerCase();
-
-  const filtered = tasks.filter((task) => {
-    if (needle) {
-      const haystack = `${task.title} ${task.description ?? ''}`.toLowerCase();
-      if (!haystack.includes(needle)) return false;
-    }
-    if (status.length && !status.includes(task.status)) return false;
-    if (priority.length && !priority.includes(task.priority)) return false;
-    if (assignees.length && !task.assignees.some((a) => assignees.includes(a.id))) return false;
-    if (overdueOnly && !isOverdue(task.dueDate, task.status)) return false;
-    return true;
-  });
-
-  const direction = state.sortDirection === 'asc' ? 1 : -1;
-
-  return filtered.sort((a, b) => {
-    switch (state.sortBy) {
-      case 'title':
-        return a.title.localeCompare(b.title) * direction;
-      case 'dueDate': {
-        // Tasks without a due date sort last in either direction: they are
-        // unscheduled, not "infinitely early".
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return (new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()) * direction;
-      }
-      case 'priority':
-        return ((PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)) * direction;
-      case 'status':
-        return (statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status)) * direction;
-      default:
-        return (a.order - b.order) * direction;
-    }
-  });
-}
+/**
+ * Filtering and sorting used to happen here, over the whole project loaded into
+ * the browser. They now happen in SQL.
+ *
+ * That was not a preference. With the views paged, the client only ever holds a
+ * page, so a filter applied here would have meant "within what happened to load"
+ * — a board reporting three matches when there are three hundred. The rules
+ * moved with the work: severity ordering for priority, the project's own column
+ * order for status, and unscheduled tasks sorting last in either direction all
+ * live in repo.SortableTaskColumns and taskOrderBy, and are tested there.
+ *
+ * Grouping stays here, because it only ever arranges what is on screen and says
+ * so.
+ */
 
 export interface TaskGroup {
   key: string;

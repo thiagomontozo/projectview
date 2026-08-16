@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -130,43 +132,9 @@ func (a *API) ListTasksForProject(w http.ResponseWriter, r *http.Request) {
 // Query: q, projectId, assigneeId, status, priority, overdue, topLevel,
 // limit, cursor.
 func (a *API) SearchTasks(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	params := httpx.ParseList(r, map[string]string{}, "")
-
-	query := repo.TaskQuery{
-		Search:     params.Search,
-		Status:     q.Get("status"),
-		Priority:   q.Get("priority"),
-		Overdue:    q.Get("overdue") == "true",
-		ParentOnly: q.Get("topLevel") == "true",
-		Limit:      params.Limit,
-	}
-
-	if raw := q.Get("projectId"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, "Invalid projectId.")
-			return
-		}
-		query.ProjectID = &id
-	}
-	if raw := q.Get("assigneeId"); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, "Invalid assigneeId.")
-			return
-		}
-		query.AssigneeID = &id
-	}
-	if params.Cursor != "" {
-		if sortValue, idValue, ok := httpx.DecodeCursor(params.Cursor); ok {
-			if t, ok := httpx.ParseTimeCursor(sortValue); ok {
-				query.CursorTime = &t
-			}
-			if id, err := uuid.Parse(idValue); err == nil {
-				query.CursorID = &id
-			}
-		}
+	query, ok := a.parseTaskQuery(w, r)
+	if !ok {
+		return
 	}
 
 	tasks, err := a.Tasks.Search(r.Context(), query)
@@ -180,12 +148,127 @@ func (a *API) SearchTasks(w http.ResponseWriter, r *http.Request) {
 		return httpx.EncodeCursor(httpx.TimeCursor(t.CreatedAt), t.ID.String())
 	})
 
-	if q.Get("total") == "true" {
+	if r.URL.Query().Get("total") == "true" {
 		if total, err := a.Tasks.CountMatching(r.Context(), query); err == nil {
 			page.Total = &total
 		}
 	}
 	httpx.JSON(w, http.StatusOK, page)
+}
+
+// GET /api/projects/:projectId/tasks/counts
+//
+// How many tasks each board column holds under the filters currently applied.
+//
+// Separate from the listing because it answers a different question and has a
+// different lifetime: the columns fetch a page each and re-fetch as somebody
+// scrolls, while the totals change only when the work does. Folding them into
+// the listing would mean recounting the whole project on every "load more".
+func (a *API) TaskCounts(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := httpx.UUIDParam(w, r, "projectId")
+	if !ok {
+		return
+	}
+	query, ok := a.parseTaskQuery(w, r)
+	if !ok {
+		return
+	}
+	query.ProjectID = &projectID
+	// A count per column has to count the columns, so any status filter from
+	// the query string is dropped - keeping it would report zero for every
+	// column the filter excludes and make the board look empty rather than
+	// filtered.
+	query.Statuses = nil
+
+	counts, err := a.Tasks.CountByStatus(r.Context(), query)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	total := int64(0)
+	for _, n := range counts {
+		total += n
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"byStatus": counts, "total": total})
+}
+
+// parseTaskQuery reads the listing query string into a repo query.
+//
+// Filters are read with r.URL.Query()[key] rather than .Get(key), so
+// "?priority=urgent&priority=high" means both rather than the first. The views
+// offer multi-select, and collapsing that to one value server-side would have
+// made a filter mean something different depending on where it was applied.
+func (a *API) parseTaskQuery(w http.ResponseWriter, r *http.Request) (repo.TaskQuery, bool) {
+	q := r.URL.Query()
+	params := httpx.ParseList(r, repo.SortableTaskColumns, "")
+
+	query := repo.TaskQuery{
+		Search:     params.Search,
+		Statuses:   cleanValues(q["status"]),
+		Priorities: cleanValues(q["priority"]),
+		Overdue:    q.Get("overdue") == "true",
+		ParentOnly: q.Get("topLevel") == "true",
+		SortColumn: params.Sort,
+		SortDesc:   params.Desc,
+		Limit:      params.Limit,
+	}
+
+	if raw := q.Get("projectId"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid projectId.")
+			return query, false
+		}
+		query.ProjectID = &id
+	}
+
+	for _, raw := range cleanValues(q["assigneeId"]) {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid assigneeId.")
+			return query, false
+		}
+		query.AssigneeIDs = append(query.AssigneeIDs, id)
+	}
+
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			httpx.Error(w, http.StatusBadRequest, "Invalid offset.")
+			return query, false
+		}
+		query.Offset = n
+	}
+
+	if params.Cursor != "" {
+		if sortValue, idValue, ok := httpx.DecodeCursor(params.Cursor); ok {
+			if t, ok := httpx.ParseTimeCursor(sortValue); ok {
+				query.CursorTime = &t
+			}
+			if id, err := uuid.Parse(idValue); err == nil {
+				query.CursorID = &id
+			}
+		}
+	}
+
+	return query, true
+}
+
+// cleanValues drops blanks from a repeated query parameter. A client that
+// sends "?status=" means "no filter", not "match the empty status" - and
+// without this it would silently match nothing.
+func cleanValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // GET /api/tasks/mine
