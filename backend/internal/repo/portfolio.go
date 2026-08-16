@@ -142,25 +142,40 @@ func (r *Portfolio) Capacity(ctx context.Context, from, to time.Time) ([]Capacit
 		weeks = 1
 	}
 
+	// One pass over the assignments, then a group-by.
+	//
+	// This used to be a LATERAL per user containing a second LATERAL per task,
+	// which meant the "how many people share this task" count ran once per
+	// assignment - 10,002 executions on a 10,000-task project - and the tasks
+	// table was scanned once per person. Measured at 400 ms for 26 people;
+	// the shape below answers the same question in one scan, because the share
+	// is a window function over the rows that are already being read.
+	//
+	// The partition counts every assignee of a surviving task, not only the
+	// ones matching the current user, which is what makes it equal to the
+	// count the old subquery took over the whole table: the WHERE clause
+	// filters tasks, never assignees.
 	rows, err := r.store.Pool.Query(ctx, `
+		WITH shares AS MATERIALIZED (
+		    SELECT ta.user_id,
+		           t.id         AS task_id,
+		           t.project_id,
+		           t.estimate_hours
+		             / GREATEST(count(*) OVER (PARTITION BY ta.task_id), 1) AS share
+		      FROM task_assignees ta
+		      JOIN tasks t ON t.id = ta.task_id
+		     WHERE t.completed_at IS NULL
+		       AND (t.due_date IS NULL OR t.due_date >= $1)
+		       AND (t.start_date IS NULL OR t.start_date <= $2)
+		)
 		SELECT u.id, u.name, u.email, u.avatar_color, u.weekly_capacity_hours,
-		       COALESCE(a.committed, 0), COALESCE(a.open_tasks, 0), COALESCE(a.projects, 0)
+		       COALESCE(SUM(s.share), 0)         AS committed,
+		       count(s.task_id)                  AS open_tasks,
+		       count(DISTINCT s.project_id)      AS projects
 		  FROM users u
-		  LEFT JOIN LATERAL (
-		      SELECT SUM(t.estimate_hours / GREATEST(shared.assignees, 1)) AS committed,
-		             count(*)                                             AS open_tasks,
-		             count(DISTINCT t.project_id)                         AS projects
-		        FROM task_assignees ta
-		        JOIN tasks t ON t.id = ta.task_id
-		        JOIN LATERAL (
-		            SELECT count(*) AS assignees FROM task_assignees WHERE task_id = t.id
-		        ) shared ON true
-		       WHERE ta.user_id = u.id
-		         AND t.completed_at IS NULL
-		         AND (t.due_date IS NULL OR t.due_date >= $1)
-		         AND (t.start_date IS NULL OR t.start_date <= $2)
-		  ) a ON true
+		  LEFT JOIN shares s ON s.user_id = u.id
 		 WHERE u.active AND u.anonymized_at IS NULL
+		 GROUP BY u.id, u.name, u.email, u.avatar_color, u.weekly_capacity_hours
 		 ORDER BY u.name`, from, to)
 	if err != nil {
 		return nil, err

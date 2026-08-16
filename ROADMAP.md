@@ -456,7 +456,8 @@ What is left at the top:
 
 - **Browser-level tests.** Every defect a user has actually hit was invisible to
   the API tests and obvious in a rendered page.
-- **The load test behind M3**, the only milestone still open.
+- **Moving the board off the unbounded listing.** The load test has been built
+  and run; what it found is below, and the board is what M3 is waiting on.
 
 ---
 
@@ -467,10 +468,66 @@ What is left at the top:
 | M0 | Smoke test proves a member cannot escalate privilege; CI green | ✅ |
 | M1 | Stack runs on Postgres; smoke test passes unchanged | ✅ |
 | M2 | Audit log covers mutations; RBAC matrix tested; sessions revocable | ✅ |
-| M3 | A 10k-task board renders under 100 ms p95 under load | ⬜ |
+| M3 | A 10k-task board renders under 100 ms p95 under load | ❌ **measured, not met** — see below |
 | M4 | Gantt reorders dependencies and recomputes the critical path | ✅ |
 | M5 | "Task overdue → notify assignee and change status" runs end to end | ✅ |
 | M6 | Deactivating in the directory revokes the session here immediately | ✅ |
+
+## M3 — the load test, and what it found
+
+Run with [`scripts/loadtest/run.sh`](scripts/loadtest/run.sh): a fixture of
+**10,000 tasks in one project** — 13,334 assignments across 25 people, 10,000
+tags, 6,000 checklist items, 2,500 comments and 2,000 dependencies arranged as
+chains and diamonds so the critical-path walk is actually exercised — then k6
+at 10 concurrent users with one second of think time.
+
+**The milestone is not met.** The numbers, rather than an adjective:
+
+| Endpoint | p95 today | p95 paginated | Isolated, one request |
+|---|---|---|---|
+| Board (`/projects/:id/tasks`) | **9.06 s** | 442 ms | 1.6 s |
+| List (same collection) | **8.88 s** | 296 ms | 1.6 s |
+| Search (`/tasks?q=`) | 748 ms | 218 ms | **49 ms** ✅ |
+| Timeline (`/projects/:id/schedule`) | 1.12 s | 750 ms | 181 ms |
+| Workload (`/users/workload`) | 698 ms | 459 ms | 118 ms |
+| Data transferred over the run | 814 MB | 264 MB | — |
+
+**The board is the whole finding, and it is not an indexing problem.** The main
+query is 130 ms; the response is **10.1 MB**, because the endpoint returns every
+task in the project fully hydrated — 1,010 bytes each, times ten thousand. No
+index and no field-trimming rescues that: even a maximally trimmed card object
+would be several megabytes. The only fix is to stop asking for all of them.
+
+**Two things the run settles that were previously assertions:**
+
+- **The search half of the premise holds.** The `tsvector` column, its GIN
+  index and the cursor pagination do what they were built for: 49 ms for a
+  page of 50 out of 10,000. Search only appears slow above because it is
+  queued behind boards.
+- **The board is also what breaks everything else.** Every other endpoint
+  improves when the board stops shipping 10 MB, without one line changing in
+  any of them — search 748 → 218 ms, workload 698 → 459 ms — while the run
+  serves **nine times more requests** (1,825 against 196).
+
+The "paginated" column is measured, not projected: it fetches a page per kanban
+column through `/api/tasks?projectId=&status=&limit=100`, the paginated endpoint
+that **already exists and is already fast**. The board page simply never moved
+onto it — which the comment on `SearchTasks` half-predicted, describing itself
+as the replacement for "the return-every-row behaviour the other listings had".
+Closing that is [BACKLOG 2.2](BACKLOG.md), scoped there, because the obstacle is
+not the query: it is that filtering, grouping and sorting live in one client-side
+module shared by six views, and server-side paging changes what a filter means.
+
+**Fixed on the way:** the capacity report ran a correlated subquery per
+assignment — "how many people share this task", 10,002 executions — and scanned
+the whole tasks table once per person. One pass with a window function instead:
+**403 ms → 150 ms**, byte-identical output.
+
+**Not met, and honestly so:** even paginated, the board is 442 ms p95 rather
+than 100 ms at this concurrency, with the remaining cost dominated by the
+timeline (512 KB of dependencies) and the workload aggregation. Both are named
+in the backlog. A single board page in isolation is ~100 ms, so the target is
+reachable, but not while four other unbounded reports run beside it.
 
 ## Effort
 
@@ -482,7 +539,11 @@ applied on boot, **10 Go test packages**, **316 end-to-end assertions** against
 a real containerised stack, **48 frontend tests**, and **5 CI jobs** gating
 every push.
 
-The honest remaining risk is **M3**: the load test has not been run. Everything
-else is either shipped or named above with a reason. The product works; what has
-not been proven is how it behaves at ten thousand tasks under concurrent load,
-and that is the next thing worth doing.
+The honest remaining risk is no longer that **M3** is unmeasured — it has been
+measured, and it failed. The board ships every task in the project in one
+response, which is 10.1 MB and nine seconds at ten thousand tasks. That is now a
+known quantity with a known fix rather than a risk, which is the whole reason
+for running the test; everything else is either shipped or named above with a
+reason. The product works, and it works at the size most installations will
+reach. What it does not yet do is hold up at ten thousand tasks in a single
+project, and that is the next thing worth doing.

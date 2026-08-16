@@ -72,19 +72,58 @@ word would have caught all three above.
 
 ## Priority 2 — claimed but unproven
 
-### 2.1 The load test behind M3
+### ✅ 2.1 The load test behind M3 — done (the test; the milestone is not met)
 
-The only milestone still open. Cursor pagination, the board index and the
-generated `tsvector` columns were all built for this, but **designed is not
-measured**.
+Built and run: [`scripts/loadtest/`](scripts/loadtest/) seeds 10,000 tasks in
+one project and drives k6 at 10 concurrent users. Full numbers are in
+[ROADMAP.md](ROADMAP.md#m3--the-load-test-and-what-it-found).
 
-**Done means:** k6 against the containerised stack with 10,000 tasks in one
-project, p95 under 100 ms on the board, the list and the search; the numbers
-recorded in the roadmap; anything that misses the target either fixed or
-written down with its reason.
+**What it settled.** Half the premise was right and half was wrong, which is
+exactly why it was worth measuring rather than arguing about:
 
-The plausible surprises are the workload aggregation and the timeline query,
-both of which fan out per person.
+- **Search, the `tsvector` column and cursor pagination hold up**: 49 ms for a
+  page of 50 out of 10,000. That part was built for this and works.
+- **The board does not**: 9.06 s p95, because `/projects/:id/tasks` returns
+  every task in the project — a **10.1 MB** response. The query is 130 ms; the
+  rest is producing and shipping ten thousand hydrated objects.
+
+**The plausible surprises were half right too.** The timeline (1.12 s) and the
+workload aggregation (698 ms) are indeed the next two, but both are an order of
+magnitude behind the board, and both improve on their own once it stops
+saturating the process.
+
+**Fixed while measuring:** the capacity report ran a per-assignment correlated
+subquery and re-scanned the tasks table once per person — 403 ms → 150 ms with
+byte-identical output.
+
+**Not fixed, and moved to 2.2 rather than folded in here:** the board itself.
+
+### 2.2 Move the board off the unbounded listing
+
+**This is what M3 is actually waiting on.** The evidence is measured, not
+argued: fetching a page per kanban column through `/api/tasks?projectId=&status=
+&limit=100` — the paginated endpoint that **already exists** — takes the board
+from 9.06 s to 442 ms p95 and drags every other endpoint down with it (search
+748 → 218 ms, workload 698 → 459 ms) while serving nine times the requests.
+
+So the backend is ready. The obstacle is on the client, and it is a real design
+question rather than a wiring job:
+
+- **Six views share one filter/group/sort module** ([useViewState.ts](frontend/src/views/useViewState.ts)),
+  and it filters the full client-side set. With server-side paging a filter
+  would silently mean "within the page I happen to have loaded" — a board
+  reporting three matches when there are three hundred is worse than a slow
+  board, and worse than no filter.
+- **The kanban needs per-column paging with a visible affordance.** A column
+  that silently shows its first hundred cards is missing data with no way to
+  tell.
+
+**Done means:** filtering, grouping and sorting resolved server-side or
+explicitly scoped in the interface; each column paged with a "load more" and a
+true total; the list, table, calendar, timeline and workload views moved with
+it; and `scripts/loadtest/run.sh paginated` re-run with the numbers recorded.
+
+Worth doing before 3.2 and 3.3: both add rows to the same views.
 
 ---
 
@@ -232,11 +271,13 @@ doing only if somebody asks by name.
 
 ## Recommendation
 
-**1.3, then 2.1.** Roughly a week and a half together.
+**1.3, then 2.2.** 2.1 is done — the load test exists and has run; what it
+found became 2.2.
 
-1.1, 1.2 and 3.1 are done: an administrator can manage accounts from the
+1.1, 1.2, 2.1 and 3.1 are done: an administrator can manage accounts from the
 interface, cannot accidentally leave the installation with nobody able to
-administer it, and people can attach files to their work.
+administer it, people can attach files to their work, and the performance
+claims are now measured rather than asserted.
 
 What remains at Priority 1 is the browser tests, and the case for them keeps
 getting stronger rather than weaker. The attachments screen that closed 3.1 is
@@ -246,4 +287,6 @@ a drag-and-drop target and an upload progress bar. A file input that silently
 does nothing would pass all 316 assertions.
 
 Everything else below Priority 2 is a feature. Everything at Priority 1 is the
-difference between working software and software that works when tested.
+difference between working software and software that works when tested — and
+2.2 is now the difference between software that works and software that works
+at the size somebody will actually load into it.
