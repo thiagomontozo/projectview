@@ -239,6 +239,155 @@ comment="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/comments" -H "$AUTH" -
 contains "comment added to the task" "$comment" "smoke comment"
 
 # ---------------------------------------------------------------------------
+section "Attachments"
+# The part unit tests cannot reach: a real file into a real object store, and a
+# signed URL that the store itself accepts. A signature is either byte-for-byte
+# correct or it is an opaque 403, and only an end-to-end fetch proves which.
+
+attach_dir="${TMPDIR:-/tmp}/pv-smoke-$RUN_ID"
+mkdir -p "$attach_dir"
+# A real PNG header, so the type is decided by the bytes rather than the name.
+printf '\211PNG\r\n\032\n' >"$attach_dir/diagram.png"
+head -c 4096 /dev/urandom >>"$attach_dir/diagram.png"
+
+attach_config="$("${CURL[@]}" -H "$AUTH" "$BASE/api/attachments/config")"
+contains "attachment limits are published" "$attach_config" '"maxBytes":'
+
+if printf '%s' "$attach_config" | grep -q '"enabled":true'; then
+    pass "object storage is configured"
+
+    uploaded="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" \
+        -F "file=@$attach_dir/diagram.png")"
+    attachment_id="$(json_str "$uploaded" id)"
+    if [ -n "$attachment_id" ]; then
+        pass "file attached to the task"
+    else
+        fail "file attached to the task" "$uploaded"
+    fi
+    contains "the original filename is kept"  "$uploaded" '"filename":"diagram.png"'
+    # Decided from the magic bytes, not from the extension or the client.
+    contains "the content type comes from the bytes" "$uploaded" '"contentType":"image/png"'
+    contains "an image is marked renderable" "$uploaded" '"inline":true'
+    # With no scanner wired in, the honest status is "skipped", never "clean".
+    contains "an unscanned file says so"      "$uploaded" '"scanStatus":"skipped"'
+    # The storage key is the address of the object and must never leave the server.
+    if printf '%s' "$uploaded" | grep -q "storageKey"; then
+        fail "the storage key stays server-side" "$uploaded"
+    else
+        pass "the storage key stays server-side"
+    fi
+
+    listing="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id/attachments")"
+    contains "the attachment is listed on the task" "$listing" "diagram.png"
+
+    # The download is a redirect to a time-limited signed URL, not a proxied
+    # body: the bytes never pass through the API process.
+    redirect_code="$(status_of -H "$AUTH" "$BASE/api/attachments/$attachment_id")"
+    check "download redirects rather than streaming" "302" "$redirect_code"
+
+    signed="$("${CURL[@]}" -H "$AUTH" "$BASE/api/attachments/$attachment_id/url")"
+    contains "the link is signed"          "$signed" "X-Amz-Signature="
+    contains "the link expires"            "$signed" '"expiresAt":'
+    # A signed URL that did not expire would be a permanent public link.
+    contains "the link carries a lifetime" "$signed" "X-Amz-Expires="
+
+    # The assertion that matters: take the redirect all the way into the object
+    # store and get the file back. This exercises the SigV4 signing, the proxy
+    # route and the bucket policy in one go, and it is the only thing that can
+    # tell a correct signature from an opaque 403.
+    signed_url="$("${CURL[@]}" -o /dev/null -w '%{redirect_url}' -H "$AUTH" "$BASE/api/attachments/$attachment_id")"
+    if [ -n "$signed_url" ]; then
+        pass "the redirect names the object store"
+
+        # The signed URL on its own, with no session at all. This is the whole
+        # point of a presigned link: possession of it is the authorization.
+        check "the signed link alone serves the file" "200" "$(status_of "$signed_url")"
+
+        # And the same object without its signature must not be readable: the
+        # bucket is private, so a leaked path is not a leaked file.
+        check "the object is not public" "403" "$(status_of "${signed_url%%\?*}")"
+    else
+        fail "the redirect names the object store" "no Location header"
+    fi
+
+    # Following the redirect while still holding the application's Bearer token,
+    # which is what curl -L and any ordinary API client do, since the redirect
+    # stays on this host. The store would otherwise see two authentication
+    # mechanisms at once - the header and the query signature - and S3 refuses
+    # that combination with 400 rather than picking one. The proxy strips the
+    # header on the way through; this proves it, because the failure it prevents
+    # looks exactly like a broken signature.
+    check "following the redirect with a session still works" "200" \
+        "$("${CURL[@]}" -L -o /dev/null -w '%{http_code}' -H "$AUTH" "$BASE/api/attachments/$attachment_id")"
+
+    check "downloading requires a session" "401" "$(status_of "$BASE/api/attachments/$attachment_id")"
+
+    # --- What is refused ---------------------------------------------------
+    printf 'MZ this is not really an executable' >"$attach_dir/setup.exe"
+    check "an executable is refused" "415" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" -F "file=@$attach_dir/setup.exe")"
+    # Only the last extension decides what runs when somebody double-clicks it.
+    cp "$attach_dir/setup.exe" "$attach_dir/invoice.pdf.exe"
+    check "a double extension is refused" "415" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" -F "file=@$attach_dir/invoice.pdf.exe")"
+
+    : >"$attach_dir/empty.txt"
+    check "an empty file is refused" "400" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" -F "file=@$attach_dir/empty.txt")"
+
+    # 26 MB against the 25 MB default: refused by the application, with a
+    # message naming the limit, rather than by nginx as an opaque 413.
+    head -c 27262976 /dev/zero >"$attach_dir/oversized.bin"
+    check "an oversized file is refused" "413" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" -F "file=@$attach_dir/oversized.bin")"
+
+    # A comment on another task cannot be used to hang a file off a
+    # conversation the caller may hold no permission on.
+    check "a foreign comment id is refused" "400" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" \
+            -F "file=@$attach_dir/diagram.png" -F "commentId=$task_id")"
+
+    # --- A file said with a comment stays with that comment ----------------
+    # The comment endpoint answers with the whole task, so the new comment's id
+    # is read out of the embedded array rather than guessed.
+    commented="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/comments" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"body":"see the attached diagram"}')"
+    comment_id="$(printf '%s' "$commented" | grep -o '"comments":\[{"id":"[^"]*"' | sed 's/.*"id":"//; s/"$//')"
+    if [ -n "$comment_id" ]; then
+        pass "a comment id can be resolved"
+        on_comment="$("${CURL[@]}" -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" \
+            -F "file=@$attach_dir/diagram.png" -F "commentId=$comment_id")"
+        contains "a file can be attached to a comment" "$on_comment" "\"commentId\":\"$comment_id\""
+        # It belongs to the task as well, which is how authorization resolves
+        # and why deleting the task takes it with everything else.
+        contains "a comment attachment still belongs to the task" "$on_comment" "\"taskId\":\"$task_id\""
+        contains "it is listed with the task's files" \
+            "$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$task_id/attachments")" "\"commentId\":\"$comment_id\""
+    else
+        fail "a comment id can be resolved" "$commented"
+    fi
+
+    contains "the upload is audited" \
+        "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=attachment.added")" "attachment.added"
+
+    # --- Removal ------------------------------------------------------------
+    check "the attachment is removed" "200" \
+        "$(status_of -X DELETE "$BASE/api/attachments/$attachment_id" -H "$AUTH")"
+    check "a removed attachment is gone" "404" \
+        "$(status_of -H "$AUTH" "$BASE/api/attachments/$attachment_id")"
+    contains "the removal is audited" \
+        "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=attachment.deleted")" "attachment.deleted"
+else
+    # A deployment without object storage is supported, so the endpoints have
+    # to say so plainly rather than fail.
+    check "uploading without a store is refused cleanly" "503" \
+        "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$AUTH" -F "file=@$attach_dir/diagram.png")"
+    pass "object storage is disabled, and says so"
+fi
+
+rm -rf "$attach_dir"
+
+# ---------------------------------------------------------------------------
 section "Dashboard charts"
 for endpoint in overview status-breakdown workload-chart project-progress completion-trend; do
     check "dashboard/$endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/dashboard/$endpoint")"
@@ -405,6 +554,13 @@ check "member cannot comment on a foreign task" "403" \
         -d '{"body":"rogue"}')"
 check "member cannot delete a foreign task" "403" \
     "$(status_of -X DELETE "$BASE/api/tasks/$task_id" -H "$MEMBER_AUTH")"
+# Attaching a file is changing the task, so it takes the same permission as
+# editing one - not merely the permission to read it.
+printf 'rogue' >"${TMPDIR:-/tmp}/pv-rogue-$RUN_ID.txt"
+check "member cannot attach a file to a foreign task" "403" \
+    "$(status_of -X POST "$BASE/api/tasks/$task_id/attachments" -H "$MEMBER_AUTH" \
+        -F "file=@${TMPDIR:-/tmp}/pv-rogue-$RUN_ID.txt")"
+rm -f "${TMPDIR:-/tmp}/pv-rogue-$RUN_ID.txt"
 check "member cannot reconfigure a foreign project" "403" \
     "$(status_of -X PUT "$BASE/api/projects/$project_id" -H "$MEMBER_AUTH" -H 'Content-Type: application/json' \
         -d '{"name":"Hijacked"}')"

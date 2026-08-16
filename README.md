@@ -54,6 +54,14 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
   cycles are refused by the database, since they make the schedule unsolvable.
   The timeline draws the arrows and highlights the chain where any slip moves
   the project's end date.
+- **Attachments** — files on a task or on one of its comments, kept in an
+  S3-compatible object store (MinIO in the bundled stack, S3 or an equivalent
+  in production) rather than in the database. Uploads pass through the API, so
+  the size and type limits and the virus-scan hook are enforceable; downloads
+  do not, because the browser is handed a **time-limited signed URL** and
+  fetches the object directly. Nothing in the bucket is public. Deleting an
+  attachment deletes the object, and so does deleting the task, the project or
+  the whole space that contained it.
 - **Custom fields** — typed per project or space (text, number, date, select,
   multi-select, checkbox, url, email, user), stored as JSONB with a GIN index.
 - **Time tracking** — a timer (one per person, enforced by the database),
@@ -108,7 +116,7 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
   them, credentials are stored encrypted and never read back, and every change
   is recorded in the audit trail.
 - **Fully containerized** with Docker Compose (proxy, frontend, backend,
-  PostgreSQL).
+  PostgreSQL, MinIO).
 
 ## Architecture
 
@@ -119,13 +127,19 @@ Internet
 ┌─────────┐   /api, /ws   ┌─────────┐        ┌───────┐
 │  proxy  │──────────────▶│ backend │───────▶│  pg   │
 │ (nginx) │               │  (Go)   │        └───────┘
-└────┬────┘               └─────────┘
-     │  everything else
-     ▼
-┌──────────┐
-│ frontend │  React SPA (nginx, static)
-└──────────┘
+└──┬───┬──┘               └────┬────┘
+   │   │  everything else      │ PUT / DELETE
+   │   ▼                       ▼
+   │ ┌──────────┐         ┌─────────┐
+   │ │ frontend │         │  minio  │  attachments
+   │ └──────────┘         └─────────┘
+   │                           ▲
+   └───────────────────────────┘
+     /attachments/…  GET with a time-limited signed URL
 ```
+
+Attachment bytes never pass through the backend on the way out: it signs a
+short-lived URL and the browser fetches the object through the proxy directly.
 
 ```
 .
@@ -134,6 +148,10 @@ Internet
 ├── frontend/    React + TypeScript SPA (Vite) + Recharts + @dnd-kit
 └── ca/          Optional extra root CAs for the build (see below)
 ```
+
+The stack also runs **MinIO** for attachments. Like PostgreSQL it is reachable
+only on the internal network; the browser gets at an object solely through a
+signed URL the proxy routes to it.
 
 - **Proxy (nginx)** — the only service bound to a host port. Terminates TLS,
   redirects HTTP to HTTPS, sets HSTS and the other security headers, rate
@@ -169,6 +187,13 @@ Internet
 | States | Skeletons shaped like the content, distinct empty vs. error states, and an error boundary so one broken component cannot blank the app |
 | Views | Filtering, grouping and sorting live in one pure module ([useViewState.ts](frontend/src/views/useViewState.ts)) shared by every view, so a filter means the same thing in the table as on the board |
 | Large lists | The list view is virtualised with TanStack Virtual — group headers and rows are flattened into one array so a single virtualizer covers the whole list |
+- **Object storage** — any S3-compatible store, addressed through a small
+  client written directly against the HTTP API (`internal/storage`) rather than
+  through an SDK: the surface used is PUT, DELETE, HEAD and a presigned GET,
+  while an SDK brings a credential-resolution chain, a retry policy and a
+  middleware stack this application already has opinions about. The SigV4
+  signing is checked against Amazon's own published test vectors, because a
+  signature is either byte-for-byte correct or an opaque 403.
 - **Database** — PostgreSQL 16. The address is fully configurable through
   `DATABASE_URL` and can point at the bundled container or any other instance
   (RDS, Cloud SQL, on-prem, …). On first run the backend applies the migrations
@@ -302,6 +327,67 @@ To use a real certificate, drop `fullchain.pem` and `privkey.pem` into
 `proxy/certs/` (gitignored) and restart the proxy. `/.well-known/acme-challenge/`
 stays reachable over plain HTTP for Let's Encrypt http-01 challenges.
 
+## Attachments
+
+Files live in an object store, never in PostgreSQL. A database whose backup is
+dominated by screenshots is a database nobody restores promptly, and the row
+would then have to be streamed through the API on every download.
+
+Four properties are deliberate:
+
+- **Uploads go through the API; downloads do not.** An upload is buffered by
+  the backend, which is what makes the size ceiling, the type rules and the
+  virus-scan hook enforceable — a presigned PUT handed to the browser would let
+  a client write whatever it liked, whatever the form said. A download is a
+  redirect to a **time-limited signed URL** (15 minutes by default), so a
+  hundred people opening a video do not spend a hundred copies of it through
+  the API's memory, and a link that leaks stops working on its own.
+- **Deleting the row is not deleting the file.** The hard case is not the
+  delete button, it is the cascade: removing a task, a project or a whole space
+  takes the attachment rows with it in one statement the application never
+  sees. So a database trigger queues every deleted row's storage key and a
+  sweeper drains that queue against the store. Deleting an object is
+  idempotent, so a retry — or a second replica — is harmless.
+- **What a file is comes from its bytes.** The multipart `Content-Type` is
+  whatever the client typed and the extension is whatever the uploader named
+  it, so both are sniffed against the actual content. The extension only
+  decides the cases sniffing cannot: every modern Office document is a ZIP
+  archive on the wire. Those extensions are carried in the application's own
+  table rather than looked up in the operating system's MIME database, so the
+  decision is the same in the Alpine runtime image as on a developer's machine
+  — the host's database is absent in the former and complete in the latter.
+- **`skipped` is not `clean`.** The virus-scan seam is left as an interface
+  with a default that records that *nothing examined the file*. Shipping
+  something that returns "clean" without looking would be worse than having no
+  scanner, because it hides the scanner's absence exactly where it matters. A
+  file that is `pending` or `infected` gets no signed URL at all, and a scan
+  that *fails* refuses the upload rather than storing something nothing will
+  ever come back to look at.
+
+Executable formats (`.exe`, `.msi`, `.js`, `.ps1`, …) are refused outright, and
+only the final extension counts — `invoice.pdf.exe` is an executable. SVG
+uploads fine but always downloads rather than rendering: an SVG is a document
+that can carry script, and displaying one inline from the application's own
+origin would hand an uploader a stored cross-site scripting vector.
+
+Reading an attachment follows the task it belongs to, which any authenticated
+user may read; attaching or removing one takes the permission to change the
+task. Removing somebody else's file additionally requires the right to manage
+the project — adding your own and dropping someone else's are not the same act.
+
+Configure it with `STORAGE_*` and `ATTACHMENT_*` (see
+[.env.example](.env.example)). Leaving `STORAGE_BUCKET` empty switches the
+feature off: the endpoints answer 503 with an explanation, the upload controls
+disappear, and nothing else changes.
+
+> The proxy routes the bucket's path to the object store, so **changing
+> `STORAGE_BUCKET` means changing the matching `location` block** in
+> [proxy/nginx.conf](proxy/nginx.conf). That is the price of not proxying every
+> download through the API. Note also that `STORAGE_PUBLIC_URL` must be the
+> host the *browser* uses: the signature covers it, so signing for
+> `minio:9000` and fetching from `localhost` fails verification — the usual
+> cause of a download that answers `SignatureDoesNotMatch`.
+
 ## Hierarchy
 
 Work is organised the way comparable tools do it:
@@ -360,6 +446,10 @@ where the target document is available, and gated by role in
 
 | Action | Who |
 |---|---|
+| Read or download an attachment | Any authenticated user (it follows the task) |
+| Attach a file to a task | Project members (owner counts), or `admin` |
+| Remove your own attachment | The uploader, with the right to change the task |
+| Remove someone else's attachment | Project owner, a `manager` who is a member, or `admin` |
 | Create accounts, assign roles, deactivate users | `admin` |
 | Reset someone else's password | `admin` |
 | Change your own password | You, **proving the current password** |
@@ -476,6 +566,8 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 | `BOOTSTRAP_ADMIN_*` | Admin account seeded on first run |
 | `OIDC_ENABLED`, `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL`, `OIDC_AUTO_PROVISION` | Single sign-on |
 | `AUDIT_RETENTION_DAYS`, `NOTIFICATION_RETENTION_DAYS`, `RETENTION_CRON` | Retention; both windows default to 0, which keeps everything |
+| `STORAGE_ENDPOINT`, `STORAGE_PUBLIC_URL`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_REGION`, `STORAGE_FORCE_PATH_STYLE`, `STORAGE_URL_TTL_MINUTES` | Attachment object storage; an empty bucket disables attachments |
+| `ATTACHMENT_MAX_MB`, `ATTACHMENT_MAX_TASK_MB`, `ATTACHMENT_ALLOWED_TYPES` | Per-file and per-task ceilings, and an optional MIME allow-list |
 | `SETTINGS_ENV_FILE` | Where the settings screen mirrors its `.env` copy; empty disables mirroring |
 | `TLS_COMMON_NAME`, `PROXY_HTTP_PORT`, `PROXY_HTTPS_PORT` | Edge proxy and TLS |
 
@@ -524,7 +616,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-284 assertions covering the proxy (HTTPS redirect, security headers, the
+316 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
@@ -547,8 +639,19 @@ member can read a document in an open space but cannot edit or delete it, and a
 private space's documents answer 404 rather than 403, so the error itself does
 not confirm they exist.
 
-**Frontend tests** — 33 assertions over the pure view logic (filtering,
-sorting, grouping) and the accessibility contracts of the primitives:
+**Attachments** get the same treatment, and the assertion that matters is the
+one only a live stack can make: the signed URL is followed all the way into the
+object store and the file comes back. A signature is either byte-for-byte
+correct or an opaque 403, so nothing short of fetching the object proves which.
+Alongside it: the content type decided from the bytes rather than the name, the
+storage key never leaving the server, an executable and a `.pdf.exe` both
+refused, an oversized and an empty file refused, the same object answering 403
+without its signature, a file attached to a comment staying with that comment,
+and a removal that leaves no row behind.
+
+**Frontend tests** — 48 assertions over the pure view logic (filtering,
+sorting, grouping), the byte formatting and the accessibility contracts of the
+primitives:
 
 ```bash
 cd frontend
@@ -612,6 +715,11 @@ the tool is safe to re-run.
   and emoji, so toggling cannot duplicate) and the record of who was named.
 - **Doc / DocRevision** — Markdown documents scoped to a space or a project,
   with a snapshot kept for every save that changed the text.
+- **Attachment** — metadata for a file on a task or a comment: the name as
+  uploaded, the content type decided from the bytes, the size, a SHA-256 and
+  the scan status. The storage key is the object's address and never leaves the
+  server. A companion table holds keys whose objects still have to be deleted,
+  filled by a trigger so a cascade cannot orphan a file.
 - **NotificationPreference** — per-user delivery choices by notification type
   and channel, quiet hours, and digest cadence.
 - **Notification** — in-app notifications (assignments, deadlines, comments),

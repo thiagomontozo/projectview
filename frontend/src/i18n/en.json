@@ -144,6 +144,21 @@
     "watch": "Watch",
     "unwatch": "Stop watching"
   },
+  "attachments": {
+    "title": "Attachments",
+    "choose": "Choose files",
+    "dropHint": "or drag them here. Up to {{limit}} per file.",
+    "uploading": "Uploading",
+    "download": "Download {{name}}",
+    "delete": "Remove {{name}}",
+    "deleted": "Attachment removed.",
+    "tooLarge": "{{name}} is larger than the {{limit}} limit.",
+    "scanning": "Checking",
+    "attachToComment": "Attach a file to this comment",
+    "commentUploadFailed": "The comment was posted, but the files could not be attached to it. Add them to the task instead.",
+    "infected": "Flagged by the virus scan",
+    "unavailable": "File attachments are not available: this installation has no object storage configured."
+  },
   "myTasks": {
     "title": "My tasks",
     "empty": "Nothing assigned to you",

@@ -82,6 +82,40 @@ type OIDCConfig struct {
 	AutoProvision bool
 }
 
+// StorageConfig points at the S3-compatible object store holding attachments.
+//
+// Not part of the settings screen, and not by omission. Changing where the
+// files live is not a setting - the objects already written do not move with
+// it, so a bucket swapped from a web form turns every existing attachment into
+// a broken link. It stays a deployment decision, like DATABASE_URL.
+type StorageConfig struct {
+	Endpoint  string
+	PublicURL string
+	Region    string
+	Bucket    string
+	AccessKey string
+	SecretKey string
+	// ForcePathStyle addresses the bucket as a path segment rather than a
+	// subdomain. MinIO requires it; so does any endpoint that is an IP address.
+	ForcePathStyle bool
+	// URLTTLMinutes is how long a signed download link stays valid. Short
+	// enough that a link pasted into a chat expires before it circulates,
+	// long enough to survive a slow download of a large file.
+	URLTTLMinutes int
+}
+
+// AttachmentsConfig bounds what may be uploaded.
+type AttachmentsConfig struct {
+	MaxBytes     int64
+	MaxTaskBytes int64
+	// AllowedTypes is an optional MIME allow-list ("application/pdf",
+	// "image/*"). Empty allows anything the deny-list in internal/storage does
+	// not refuse outright, which is the right default for an internal tool: a
+	// list nobody maintains becomes the reason people go back to e-mailing
+	// files around.
+	AllowedTypes []string
+}
+
 // RetentionConfig bounds how long two tables nobody prunes by hand are kept.
 // Zero disables a sweep entirely - the honest default, since deleting records
 // is not something to start doing because a config file was left empty.
@@ -106,13 +140,15 @@ type RetentionConfig struct {
 // from a web form is one compromised administrator away from being somebody
 // else's.
 type Config struct {
-	NodeEnv    string
-	Port       string
-	Log        LogConfig
-	Database   DatabaseConfig
-	JWT        JWTConfig
-	Bootstrap  BootstrapConfig
-	CORSOrigin string
+	NodeEnv     string
+	Port        string
+	Log         LogConfig
+	Database    DatabaseConfig
+	JWT         JWTConfig
+	Bootstrap   BootstrapConfig
+	Storage     StorageConfig
+	Attachments AttachmentsConfig
+	CORSOrigin  string
 
 	mu sync.RWMutex
 	// The values as the environment supplied them. Kept so that clearing an
@@ -210,6 +246,23 @@ func getbool(key string, fallback bool) bool {
 	}
 }
 
+// getlist reads a comma-separated variable. An unset or empty value yields nil
+// rather than a slice holding one empty string, which callers would otherwise
+// have to special-case as "a list of nothing" versus "no list".
+func getlist(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	out := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 func getint(key string, fallback int) int {
 	v := os.Getenv(key)
 	if v == "" {
@@ -250,6 +303,31 @@ func Load() *Config {
 			AdminEmail:    getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com"),
 			AdminName:     getenv("BOOTSTRAP_ADMIN_NAME", "Administrator"),
 			AdminPassword: getenv("BOOTSTRAP_ADMIN_PASSWORD", "ChangeMe123!"),
+		},
+
+		Storage: StorageConfig{
+			Endpoint:  getenv("STORAGE_ENDPOINT", ""),
+			PublicURL: getenv("STORAGE_PUBLIC_URL", ""),
+			Region:    getenv("STORAGE_REGION", "us-east-1"),
+			Bucket:    getenv("STORAGE_BUCKET", ""),
+			AccessKey: getenv("STORAGE_ACCESS_KEY", ""),
+			SecretKey: getenv("STORAGE_SECRET_KEY", ""),
+			// Defaults to true because the bundled deployment is MinIO, which
+			// has no other option, and because path style works everywhere
+			// while virtual-host style does not.
+			ForcePathStyle: getbool("STORAGE_FORCE_PATH_STYLE", true),
+			URLTTLMinutes:  getint("STORAGE_URL_TTL_MINUTES", 15),
+		},
+
+		Attachments: AttachmentsConfig{
+			// 25 MB, deliberately under the proxy's 30 MB
+			// client_max_body_size. Raising this above that ceiling would move
+			// enforcement to nginx, and the person uploading would get an
+			// unexplained 413 instead of this application's message naming the
+			// limit.
+			MaxBytes:     int64(getint("ATTACHMENT_MAX_MB", 25)) << 20,
+			MaxTaskBytes: int64(getint("ATTACHMENT_MAX_TASK_MB", 250)) << 20,
+			AllowedTypes: getlist("ATTACHMENT_ALLOWED_TYPES"),
 		},
 
 		CORSOrigin: getenv("CORS_ORIGIN", "*"),

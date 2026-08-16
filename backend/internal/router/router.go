@@ -235,6 +235,23 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 
 		r.Post("/{id}/watch", api.WatchTask)
 		r.Delete("/{id}/watch", api.UnwatchTask)
+
+		r.Get("/{id}/attachments", api.ListAttachments)
+		r.Post("/{id}/attachments", api.UploadAttachment)
+	})
+
+	// Attachments are addressed by their own id once they exist, because a
+	// download link has to survive being pasted somewhere: routing it under the
+	// task would break the moment a file moved between a task and one of its
+	// comments.
+	r.Route("/api/attachments", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/config", api.AttachmentConfig)
+		// Redirects to a time-limited signed URL served by the object store;
+		// the bytes never pass through this process.
+		r.Get("/{id}", api.DownloadAttachment)
+		r.Get("/{id}/url", api.AttachmentURL)
+		r.Delete("/{id}", api.DeleteAttachment)
 	})
 
 	r.Route("/api/chat", func(r chi.Router) {

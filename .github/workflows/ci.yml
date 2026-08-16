@@ -157,6 +157,7 @@ jobs:
                    notification_preferences \
                    goals key_results dashboards project_baselines service_tokens \
                    app_settings \
+                   attachments attachment_deletions \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
@@ -175,10 +176,23 @@ jobs:
           psql "SELECT indexname FROM pg_indexes WHERE indexname = 'time_entries_single_running_idx'" | grep -q . \
             || { echo "single-running-timer index is missing" >&2; exit 1; }
 
+          # Deleting an attachment row has to take its object with it, and the
+          # path that matters is the cascade - dropping a task or a project
+          # removes rows in one statement the application never sees. The queue
+          # is filled by a trigger precisely so no code path can bypass it.
+          psql "SELECT tgname FROM pg_trigger WHERE tgname = 'attachments_queue_object_delete'" | grep -q . \
+            || { echo "attachment object-delete trigger is missing" >&2; exit 1; }
+
+          # An object is addressed by its storage key, so two rows sharing one
+          # would make either row's deletion break the other's download.
+          psql "SELECT indexname FROM pg_indexes WHERE tablename='attachments'" \
+            | grep -q 'attachments_storage_key_key' \
+            || { echo "attachment storage keys are not unique" >&2; exit 1; }
+
           # Every migration must be recorded, so a restart does not re-run one.
           for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy \
                    0004_product_engine 0005_collaboration 0006_enterprise \
-                   0007_app_settings; do
+                   0007_app_settings 0008_attachments; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done

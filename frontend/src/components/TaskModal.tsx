@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import clsx from 'clsx';
+import Attachments, { AttachmentList, CommentAttachmentPicker } from './Attachments';
 import { Dialog, ConfirmDialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { Field, Input, Textarea } from '../ui/Field';
@@ -9,7 +10,9 @@ import { Avatar, Badge } from '../ui/display';
 import { useToast } from '../ui/Toast';
 import { Check, ChevronDown } from '../ui/icons';
 import {
+  newCommentId,
   useAddComment,
+  useAttachments,
   useCustomFields,
   useDeleteTask,
   useLogTime,
@@ -19,7 +22,8 @@ import {
   useStartTimer,
   useStopTimer,
   useTask,
-  useTaskTime
+  useTaskTime,
+  useUploadAttachment
 } from '../lib/queries';
 import { errorMessage } from '../lib/api';
 import { toDateInput } from '../lib/format';
@@ -47,6 +51,8 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
   const saveTask = useSaveTask();
   const deleteTask = useDeleteTask();
   const addComment = useAddComment();
+  const uploadAttachment = useUploadAttachment();
+  const { data: attachments = [] } = useAttachments(isEdit ? task!.id : undefined);
 
   const [form, setForm] = useState({
     title: task?.title ?? '',
@@ -61,6 +67,48 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [commentFiles, setCommentFiles] = useState<File[]>([]);
+
+  /**
+   * Posts the comment, then attaches whatever was chosen alongside it.
+   *
+   * In that order because a file has to belong to something: the comment is
+   * created first, its id is read back by diffing the returned task against
+   * the one held before, and the uploads are pointed at it. Attaching to the
+   * task first and re-pointing afterwards would strand a file on the task
+   * every time the comment itself failed to save.
+   */
+  function sendComment() {
+    if (!task || !comment.trim()) return;
+    const before = current;
+
+    addComment.mutate(
+      { taskId: task.id, body: comment },
+      {
+        onSuccess: (updated) => {
+          setComment('');
+          const commentId = newCommentId(before, updated);
+          const pending = commentFiles;
+          setCommentFiles([]);
+
+          // Without an id the files would silently attach to the task instead
+          // of the comment, which is not what was asked for — so say so rather
+          // than quietly doing something else.
+          if (!commentId) {
+            if (pending.length > 0) setError(t('attachments.commentUploadFailed'));
+            return;
+          }
+          for (const file of pending) {
+            uploadAttachment.mutate(
+              { taskId: task.id, file, commentId },
+              { onError: (err) => setError(errorMessage(err, t('errors.genericBody'))) }
+            );
+          }
+        },
+        onError: (err) => setError(errorMessage(err, t('errors.genericBody')))
+      }
+    );
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -263,37 +311,45 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
 
         {isEdit && task && <TimeSection task={current ?? task} />}
 
-        {isEdit && (
+        {/* Only once the task exists: a file has to be attached to something,
+            and there is no id to attach it to before the first save. */}
+        {isEdit && task && <Attachments taskId={task.id} />}
+
+        {isEdit && task && (
           <section>
             <h4 className={controls.label}>{t('task.comments')}</h4>
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 var(--space-3)', display: 'grid', gap: 'var(--space-2)' }}>
+            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 var(--space-3)', display: 'grid', gap: 'var(--space-3)' }}>
               {current?.comments?.map((entry) => (
                 <li key={entry.id} style={{ fontSize: 'var(--text-sm)' }}>
                   <strong>{entry.author?.name ?? '—'}:</strong> {entry.body}
+                  {/* Files said with the comment stay with the comment, rather
+                      than pooling in the task's list where the sentence that
+                      explains them is nowhere in sight. */}
+                  <AttachmentList
+                    items={attachments.filter((a) => a.commentId === entry.id)}
+                    taskId={task.id}
+                  />
                 </li>
               ))}
             </ul>
-            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-              <Input
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder={t('task.writeComment')}
-                aria-label={t('task.writeComment')}
-              />
-              <Button
-                type="button"
-                loading={addComment.isPending}
-                disabled={!comment.trim()}
-                onClick={() =>
-                  task &&
-                  addComment.mutate(
-                    { taskId: task.id, body: comment },
-                    { onSuccess: () => setComment('') }
-                  )
-                }
-              >
-                {t('task.send')}
-              </Button>
+            <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <Input
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder={t('task.writeComment')}
+                  aria-label={t('task.writeComment')}
+                />
+                <Button
+                  type="button"
+                  loading={addComment.isPending || uploadAttachment.isPending}
+                  disabled={!comment.trim()}
+                  onClick={sendComment}
+                >
+                  {t('task.send')}
+                </Button>
+              </div>
+              <CommentAttachmentPicker files={commentFiles} onChange={setCommentFiles} />
             </div>
           </section>
         )}

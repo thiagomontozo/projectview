@@ -30,6 +30,7 @@ import (
 	"projectview/internal/router"
 	"projectview/internal/seed"
 	"projectview/internal/services"
+	"projectview/internal/storage"
 	"projectview/internal/ws"
 )
 
@@ -73,6 +74,44 @@ func main() {
 	api.EnvMirror = services.NewEnvMirror(os.Getenv("SETTINGS_ENV_FILE"))
 	if api.EnvMirror.Enabled() {
 		logger.Info("Settings mirror: %s", api.EnvMirror.Path())
+	}
+
+	// Object storage for attachments. Absent configuration is a supported
+	// deployment, not an error: the attachment endpoints answer 503 and
+	// everything else works exactly as before.
+	objects, err := storage.New(storage.Config{
+		Endpoint:       cfg.Storage.Endpoint,
+		PublicURL:      cfg.Storage.PublicURL,
+		Region:         cfg.Storage.Region,
+		Bucket:         cfg.Storage.Bucket,
+		AccessKey:      cfg.Storage.AccessKey,
+		SecretKey:      cfg.Storage.SecretKey,
+		ForcePathStyle: cfg.Storage.ForcePathStyle,
+	})
+	if err != nil {
+		logger.Error("attachment storage is misconfigured, attachments will be unavailable: %v", err)
+	}
+	api.Objects = objects
+
+	if objects.Enabled() {
+		// Probed at boot so a wrong bucket or a rejected key is a line in the
+		// startup log rather than a failure the first person to attach a file
+		// discovers. Deliberately not fatal: the rest of the application is
+		// perfectly usable without it.
+		checkCtx, cancelCheck := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := objects.Check(checkCtx); err != nil {
+			logger.Error("Attachments: bucket %q is not usable: %v", objects.Bucket(), err)
+		} else {
+			logger.Info("Attachments: storing in bucket %q (max %d MB per file)",
+				objects.Bucket(), cfg.Attachments.MaxBytes>>20)
+		}
+		cancelCheck()
+
+		// Drains the keys the delete trigger queues, so removing a task or a
+		// whole project takes its files with it rather than only its rows.
+		services.NewObjectSweeper(api.Attachments, objects).Start()
+	} else {
+		logger.Info("Attachments: no object storage configured, file uploads are disabled")
 	}
 
 	mailer := services.NewMailer(cfg)

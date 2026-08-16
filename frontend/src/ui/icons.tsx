@@ -262,6 +262,27 @@ export const ChevronLeft = (p: IconProps) => (
   </Icon>
 );
 
+export const Paperclip = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 1 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 1 1-2.59-2.6l8.49-8.48" />
+  </Icon>
+);
+
+export const Download = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3v12m0 0 4-4m-4 4-4-4" />
+    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </Icon>
+);
+
+export const Trash = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 7h16M10 11v6M14 11v6" />
+    <path d="M5 7l1 13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-13" />
+    <path d="M9 7V4h6v3" />
+  </Icon>
+);
+
 export const Command = (p: IconProps) => (
   <Icon {...p}>
     <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3Z" />

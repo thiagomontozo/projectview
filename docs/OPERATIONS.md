@@ -52,9 +52,14 @@ docker compose exec -T postgres psql -U projectview -d projectview   -c "SELECT 
 
 ## Backup
 
-The only stateful component is PostgreSQL. The application containers hold
-nothing that is not in the database or the image, so a database backup plus the
-repository is a complete recovery position.
+There are **two** stateful components: PostgreSQL, and the object store holding
+attachments. The application containers hold nothing that is not in one of
+them or in the image.
+
+Backing up only the database is the mistake worth naming, because it fails
+quietly: the restored installation looks complete, every task and comment is
+there, and the attachments are broken links nobody notices until somebody opens
+one. The two have to be backed up together and restored together.
 
 ### Nightly dump
 
@@ -75,6 +80,33 @@ Scheduler). Two things matter more than the schedule:
   disk survives a dropped table and nothing else.
 - **Keep several.** Corruption is often noticed days later, and a single
   rolling backup will by then be a faithful copy of the corruption.
+
+### Attachments
+
+The dump above contains attachment *metadata* only — the filename, size,
+checksum and storage key. The bytes are in the bucket and have to be copied
+separately:
+
+```bash
+# Mirror the bucket. --remove keeps the copy exact rather than accumulating
+# objects that were deleted upstream; drop it if you would rather the backup
+# retain deleted files.
+docker compose exec -T minio \
+  mc mirror --overwrite --remove local/attachments /backup/attachments
+```
+
+On a managed store, use whatever it already offers instead — S3 versioning plus
+cross-region replication is a better answer than a nightly mirror, and it
+covers the case a mirror cannot: an object deleted and mirrored away before
+anybody noticed.
+
+Take the two backups **close together, database last**. In that order a
+restored pair can hold an object with no row — which costs storage and nothing
+else — rather than a row with no object, which is a broken download.
+
+The checksums are what make a restore verifiable: `attachments.checksum` is the
+SHA-256 of the bytes as received, so a restored object can be checked against
+the row that describes it rather than merely counted.
 
 ### What is *not* in the dump
 
@@ -129,6 +161,28 @@ SELECT count(*) FROM users WHERE active;
 SELECT count(*) FROM tasks;
 SELECT max(occurred_at) FROM audit_log;   -- how fresh the backup really was
 ```
+
+And prove the attachments came back with everything else. A row whose object is
+missing is the failure mode a database-only restore produces, and it is
+invisible until somebody clicks:
+
+```bash
+# Every storage key the database expects.
+docker compose exec -T postgres psql -U projectview -d projectview -tAc \
+  "SELECT storage_key FROM attachments ORDER BY storage_key" | sort > /tmp/expected
+
+# Every object actually in the bucket.
+docker compose exec -T minio mc ls --recursive local/attachments \
+  | awk '{print $NF}' | sort > /tmp/present
+
+# Rows with no object: broken downloads. Must be empty.
+comm -23 /tmp/expected /tmp/present
+```
+
+The reverse direction (`comm -13`) lists objects with no row. Those are
+harmless — they are what the deferred-delete queue has not drained yet, or what
+a restore taken database-first left behind — and the sweeper removes the ones
+it knows about.
 
 ### Point-in-time recovery
 
@@ -294,6 +348,13 @@ What is *not* yet distributed, and would need to be before scaling out:
 - **The alert, digest and retention schedulers run in every process.** Two
   replicas would send some notifications twice. They need a lock — an advisory
   lock in PostgreSQL is sufficient — before a second replica is safe.
+
+The **attachment object sweeper** also runs in every process, and unlike the
+schedulers that is safe: deleting an object is idempotent, and a key already
+removed by another replica simply succeeds and clears from the queue. Two
+replicas duplicate the work rather than share it, which is wasteful at most.
+It is listed here so nobody adds a lock to it under the impression it needs
+one.
 
 For PostgreSQL itself, use your platform's managed high availability rather
 than building it here. The application needs one connection string; how many

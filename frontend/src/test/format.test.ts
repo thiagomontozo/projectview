@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isOverdue, priorityTone, toDateInput } from '../lib/format';
+import { formatBytes } from '../components/Attachments';
 
 describe('isOverdue', () => {
   const yesterday = new Date(Date.now() - 86_400_000).toISOString();
@@ -48,5 +49,25 @@ describe('priorityTone', () => {
 
   it('falls back to neutral for an unknown value', () => {
     expect(priorityTone('whatever')).toBe('neutral');
+  });
+});
+
+describe('formatBytes', () => {
+  // Binary units, matching the server's limits. Showing a 25 MiB ceiling as
+  // "26.2 MB" and then refusing a 26 MB file is the kind of small
+  // inconsistency that costs somebody ten minutes.
+  it('uses the same units the server enforces', () => {
+    expect(formatBytes(25 * 1024 * 1024)).toBe('25 MB');
+    expect(formatBytes(250 * 1024 * 1024)).toBe('250 MB');
+    expect(formatBytes(1024 * 1024 * 1024)).toBe('1 GB');
+  });
+
+  it('keeps one decimal only where it carries information', () => {
+    expect(formatBytes(1536)).toBe('1.5 kB');
+    expect(formatBytes(900)).toBe('900 B');
+  });
+
+  it('handles an empty file without producing NaN', () => {
+    expect(formatBytes(0)).toBe('0 B');
   });
 });

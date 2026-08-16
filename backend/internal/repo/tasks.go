@@ -430,6 +430,19 @@ func (r *Tasks) AddComment(ctx context.Context, taskID, authorID uuid.UUID, body
 	return &c, nil
 }
 
+// CommentTask reports which task a comment belongs to, so a caller naming a
+// comment can be checked against the task it claims to be on rather than
+// trusted about it.
+func (r *Tasks) CommentTask(ctx context.Context, commentID uuid.UUID) (uuid.UUID, error) {
+	var taskID uuid.UUID
+	err := r.store.Pool.QueryRow(ctx,
+		`SELECT task_id FROM task_comments WHERE id = $1`, commentID).Scan(&taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	return taskID, err
+}
+
 func replaceTags(ctx context.Context, tx pgx.Tx, taskID uuid.UUID, tags []string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM task_tags WHERE task_id = $1`, taskID); err != nil {
 		return err

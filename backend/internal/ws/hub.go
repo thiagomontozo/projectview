@@ -133,12 +133,26 @@ func (h *Hub) unregister(c *client) {
 			last = true
 		}
 	}
+	// Typing is dropped while the client map is still locked, so going offline
+	// and stopping typing become one indivisible change. Doing it after the
+	// unlock left a window in which the hub answered "not online" and "still
+	// typing" at the same time - long enough for a caller that reacts to the
+	// presence event to read the contradiction, and the reason the disconnect
+	// test failed intermittently.
+	var cleared []string
+	if last {
+		cleared = h.takeTypingFor(c.userID)
+	}
 	h.mu.Unlock()
 	close(c.send)
 
+	// Announced outside both locks: each of these broadcasts, and broadcasting
+	// takes h.mu again.
 	if last {
 		h.broadcastPresence(c.userID, false)
-		h.clearTypingFor(c.userID)
+		for _, channelID := range cleared {
+			h.announceTyping(channelID, c.userID, false)
+		}
 	}
 }
 
@@ -383,19 +397,26 @@ func (h *Hub) expireTyping() {
 	}
 }
 
-func (h *Hub) clearTypingFor(userID string) {
+// takeTypingFor removes every typing entry a user holds and returns the
+// channels they were in. It only mutates - the caller announces - because it is
+// called with h.mu held, and announcing takes h.mu again.
+//
+// The lock order is h.mu then typingMu, and nothing takes them the other way
+// round: every path that holds typingMu releases it before broadcasting.
+func (h *Hub) takeTypingFor(userID string) []string {
 	cleared := []string{}
 
 	h.typingMu.Lock()
+	defer h.typingMu.Unlock()
+
 	for channelID, users := range h.typing {
 		if _, ok := users[userID]; ok {
 			delete(users, userID)
 			cleared = append(cleared, channelID)
 		}
+		if len(users) == 0 {
+			delete(h.typing, channelID)
+		}
 	}
-	h.typingMu.Unlock()
-
-	for _, channelID := range cleared {
-		h.announceTyping(channelID, userID, false)
-	}
+	return cleared
 }

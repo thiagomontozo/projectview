@@ -14,6 +14,7 @@ import (
 	"projectview/internal/obs"
 	"projectview/internal/repo"
 	"projectview/internal/services"
+	"projectview/internal/storage"
 	"projectview/internal/ws"
 )
 
@@ -49,6 +50,14 @@ type API struct {
 	Tokens        *repo.ServiceTokens
 	Privacy       *repo.Privacy
 	Settings      *repo.Settings
+	Attachments   *repo.Attachments
+	// Objects is the S3-compatible store holding attachment bytes. A nil value
+	// is valid and means the deployment has none: the attachment endpoints
+	// answer 503 and the rest of the application is unaffected.
+	Objects *storage.S3
+	// Scanner examines uploads. Nil falls back to services.SkipScanner, which
+	// records that nothing looked at the file rather than claiming it is clean.
+	Scanner services.Scanner
 	// EnvMirror and Mailer are set by main: one needs a path from the
 	// environment, the other needs the config the settings screen mutates.
 	EnvMirror *services.EnvMirror
@@ -93,5 +102,6 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Tokens:        repo.NewServiceTokens(store),
 		Privacy:       repo.NewPrivacy(store),
 		Settings:      repo.NewSettings(store, cfg.JWT.Secret),
+		Attachments:   repo.NewAttachments(store),
 	}
 }

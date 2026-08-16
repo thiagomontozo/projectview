@@ -48,8 +48,8 @@ their own profile.
 
 **The strongest evidence in this backlog is the recent history.**
 
-Three defects in a row reached a user despite five green CI jobs, 284 API
-assertions and 45 frontend tests:
+Three defects in a row reached a user despite five green CI jobs, 316 API
+assertions and 48 frontend tests:
 
 | Defect | Why nothing caught it |
 |---|---|
@@ -90,15 +90,68 @@ both of which fan out per person.
 
 ## Priority 3 — product features people will ask for
 
-### 3.1 Attachments
+*(3.1 is done; 3.2 and 3.3 remain.)*
 
-The most visible functional gap for anyone using the product. Needs object
-storage — MinIO in compose, S3 in production — which is why it has stayed out:
-it is infrastructure, not a corner of an existing screen.
+### ✅ 3.1 Attachments — done
 
-**Done means:** upload on a task and a comment, virus-scan hook left as a
-seam, signed time-limited URLs rather than public ones, size and type limits,
-and deletion that actually removes the object rather than only the row.
+Files on a task or one of its comments, kept in an S3-compatible object store
+(MinIO in compose, S3 or an equivalent in production). Every part of what
+"done" was defined as is in place: signed time-limited URLs rather than public
+ones, per-file and per-task size limits, an optional MIME allow-list, a
+virus-scan hook left as a seam, and deletion that removes the object.
+
+Four decisions worth knowing, all of them asserted:
+
+- **Uploads pass through the API; downloads do not.** Buffering the upload is
+  what makes the size ceiling, the type rules and the scan hook enforceable — a
+  presigned PUT handed to the browser would let a client write whatever it
+  liked. A download is a redirect to a signed URL the object store serves
+  itself, so the bytes never spend the API's memory.
+- **Deleting the row is not deleting the file, and the cascade is the hard
+  case.** Removing a task, a project or a space drops attachment rows in one
+  statement the application never observes. So a trigger queues every deleted
+  row's storage key and a sweeper drains it — the only construction that covers
+  a path no handler is on. Verified end to end: uploading, deleting the whole
+  *project*, then watching the object leave the bucket.
+- **What a file is comes from its bytes**, not from the extension or the
+  client's `Content-Type`, both of which the uploader controls. The extension
+  decides only what sniffing cannot: every Office document is a ZIP on the
+  wire. Executable formats are refused outright, and only the final extension
+  counts.
+- **`skipped` is not `clean`.** With no scanner wired in the status records
+  that *nothing examined the file*. Collapsing the two would hide the scanner's
+  absence exactly where it matters.
+
+**Three defects found while building it, all fixed and all now covered:**
+
+- `mime.TypeByExtension` reads the *host's* MIME database, which Windows has
+  and the Alpine runtime image does not. Every Office document resolved
+  correctly in development and would have arrived as `application/octet-stream`
+  in production — where an allow-list naming those types would then have
+  refused it. The table is now the application's own. Found only by running the
+  unit tests inside the runtime image rather than on the development machine,
+  which is the lesson worth keeping.
+- Following the download redirect while still holding a session produced a 400:
+  the store saw two authentication mechanisms at once, the Bearer header and
+  the query signature, and S3 refuses that combination. The proxy now strips
+  the header, since the signed URL is the authorization on that leg. Browsers
+  never sent it anyway; API clients did.
+- A scan that failed left the row `pending` forever — visible in the list and
+  permanently refusing to download, with nothing to revisit it. A failed scan
+  now refuses the upload and removes the object, which is both fail-closed and
+  something the person can act on.
+
+**And one in the proxy, found by the test that was meant to prove the fix:** a
+single `proxy_set_header` inside a `location` discards *every* inherited one,
+exactly as `add_header` does. Stripping the Authorization header silently
+dropped `Host`, so the store received `minio:9000` instead of the name the URL
+was signed for and rejected every download. The inherited headers are now
+repeated explicitly.
+
+**Not included, deliberately:** chat attachments. The chat schema has no
+equivalent hook and the permission model there is channel membership rather
+than project membership, so it is a second piece of work rather than a wider
+`WHERE` clause. It is listed under the smaller items below.
 
 ### 3.2 Recurring tasks
 
@@ -165,7 +218,10 @@ doing only if somebody asks by name.
   restart, and a field that silently does nothing until the next deploy is
   worse than no field. Making the schedulers rebuildable would close it.
 - **Chat has no attachments and no editing**, though the schema has an
-  `edited_at` column waiting for it.
+  `edited_at` column waiting for it. Tasks have attachments now (3.1) and the
+  object storage is in place, so the remaining work is the permission side:
+  a chat file is gated by channel membership rather than by project membership,
+  which is a different resolution path rather than a wider query.
 - **No rich-text editor.** Descriptions and comments are plain text; documents
   are Markdown. A deliberate choice, revisit only if it becomes a complaint.
 - **Intake forms** — the last unbuilt item from the collaboration phase.
@@ -178,14 +234,16 @@ doing only if somebody asks by name.
 
 **1.3, then 2.1.** Roughly a week and a half together.
 
-1.1 and 1.2 are done: an administrator can now manage accounts from the
-interface, and cannot accidentally leave the installation with nobody able to
-administer it.
+1.1, 1.2 and 3.1 are done: an administrator can manage accounts from the
+interface, cannot accidentally leave the installation with nobody able to
+administer it, and people can attach files to their work.
 
-What remains at Priority 1 is the browser tests, and the case for them has
-only got stronger — the screen that closed 1.1 is itself covered only at the
-API. Every defect a user has actually seen in this project was invisible there
-and obvious in a rendered page.
+What remains at Priority 1 is the browser tests, and the case for them keeps
+getting stronger rather than weaker. The attachments screen that closed 3.1 is
+covered the same way as everything before it — thoroughly at the API, not at
+all in a browser — and it adds the two interactions the API cannot see at all:
+a drag-and-drop target and an upload progress bar. A file input that silently
+does nothing would pass all 316 assertions.
 
-Everything below Priority 2 is a feature. Everything at Priority 1 is the
+Everything else below Priority 2 is a feature. Everything at Priority 1 is the
 difference between working software and software that works when tested.

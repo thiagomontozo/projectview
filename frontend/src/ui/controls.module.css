@@ -94,6 +94,27 @@
   background: var(--danger-subtle);
 }
 
+/* An anchor that looks like a ghost icon button.
+   Deliberately an <a> and not a <button>: it navigates to a file, so it has to
+   keep the middle-click, "open in new tab" and "copy link" behaviour a button
+   does not have. */
+.iconLink {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.iconLink:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
 .block {
   width: 100%;
 }

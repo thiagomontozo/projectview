@@ -139,6 +139,46 @@ export interface Comment {
   createdAt: string;
 }
 
+/**
+ * Whether an uploaded file was examined.
+ *
+ * `skipped` is not `clean`: it means no scanner is wired in, so nothing looked
+ * at the file. The interface says so rather than implying a check that never
+ * happened.
+ */
+export type ScanStatus = 'pending' | 'clean' | 'infected' | 'skipped';
+
+/** A file on a task, or on one of its comments. */
+export interface Attachment {
+  id: string;
+  taskId: string;
+  commentId?: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  checksum: string;
+  scanStatus: ScanStatus;
+  scannedAt?: string;
+  uploadedBy?: PublicUser;
+  /**
+   * This API's redirect, not the signed object URL. Following it mints a
+   * short-lived link at the moment somebody actually asks for the file, rather
+   * than handing out a live capability for every attachment on the page.
+   */
+  downloadUrl: string;
+  /** Safe for the browser to render in place (images and PDFs). */
+  inline: boolean;
+  createdAt: string;
+}
+
+/** What the server will accept, so a file can be refused before it is sent. */
+export interface AttachmentConfig {
+  enabled: boolean;
+  maxBytes: number;
+  maxTaskBytes: number;
+  allowedTypes: string[] | null;
+}
+
 export interface Task {
   id: string;
   title: string;

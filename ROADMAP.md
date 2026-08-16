@@ -440,9 +440,19 @@ Nothing in the roadmap: all eight phases are delivered. The outstanding work is
 tracked in **[BACKLOG.md](BACKLOG.md)**, ordered by what blocks use rather than
 by size.
 
-Two of its Priority 1 items have since shipped — a user administration screen,
-and a refusal to demote or deactivate the last administrator. What is left at
-the top:
+Three of its items have since shipped — a user administration screen, a refusal
+to demote or deactivate the last administrator, and **attachments**, which
+closes the deferral carried through phases A3 and B3 by adding the object
+storage those phases named as the reason to wait.
+
+Attachments also cost the WebSocket hub a bug fix. Running the suite inside the
+runtime image surfaced an intermittent failure in a test nothing had touched:
+`unregister` announced a disconnect before clearing the departing client's
+typing entry, so for a moment the hub answered "not online" and "still typing"
+at once. Both facts now change under the same lock. It had been flaky in CI
+rather than wrong-looking, which is how it survived this long.
+
+What is left at the top:
 
 - **Browser-level tests.** Every defect a user has actually hit was invisible to
   the API tests and obvious in a rendered page.
@@ -467,9 +477,10 @@ the top:
 Every phase of the plan is done. Against the original estimate of ~30
 person-weeks, the eight phases landed as **9 verified deliveries**.
 
-What the system is now, measured rather than asserted: **6 embedded migrations**
-applied on boot, **9 Go test packages**, **284 end-to-end assertions** against a
-real containerised stack, and **5 CI jobs** gating every push.
+What the system is now, measured rather than asserted: **8 embedded migrations**
+applied on boot, **10 Go test packages**, **316 end-to-end assertions** against
+a real containerised stack, **48 frontend tests**, and **5 CI jobs** gating
+every push.
 
 The honest remaining risk is **M3**: the load test has not been run. Everything
 else is either shipped or named above with a reason. The product works; what has

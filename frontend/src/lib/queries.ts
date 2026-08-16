@@ -8,6 +8,8 @@ import {
 import { api, statusOf } from './api';
 import type {
   AppNotification,
+  Attachment,
+  AttachmentConfig,
   ChatChannel,
   ChatMessage,
   DashboardOverview,
@@ -80,6 +82,8 @@ export const keys = {
   schedule: (projectId: string) => ['projects', projectId, 'schedule'] as const,
   customFields: (projectId: string) => ['projects', projectId, 'fields'] as const,
   taskTime: (taskId: string) => ['tasks', taskId, 'time'] as const,
+  attachments: (taskId: string) => ['tasks', taskId, 'attachments'] as const,
+  attachmentConfig: ['attachments', 'config'] as const,
   runningTimer: ['time', 'running'] as const,
   thread: (messageId: string) => ['chat', 'thread', messageId] as const,
   presence: ['presence'] as const,
@@ -323,8 +327,26 @@ export function useAddComment() {
   return useMutation({
     mutationFn: ({ taskId, body }: { taskId: string; body: string }) =>
       api.post<Task>(`/tasks/${taskId}/comments`, { body }).then((r) => r.data),
-    onSuccess: (_task, { taskId }) => client.invalidateQueries({ queryKey: keys.task(taskId) })
+    onSuccess: (_task, { taskId }) => {
+      client.invalidateQueries({ queryKey: keys.task(taskId) });
+      // A comment can carry files, so the attachment list is stale too.
+      client.invalidateQueries({ queryKey: keys.attachments(taskId) });
+    }
   });
+}
+
+/**
+ * Identifies the comment a request just created.
+ *
+ * The endpoint answers with the whole task rather than the new comment, so the
+ * id is found by diffing against the ids that existed before. Deliberately not
+ * "take the last one": that assumes an ordering the client does not control,
+ * and this needs no assumption at all — the new id is simply the one that was
+ * not there a moment ago.
+ */
+export function newCommentId(before: Task | undefined, after: Task): string | undefined {
+  const existing = new Set((before?.comments ?? []).map((c) => c.id));
+  return after.comments?.find((c) => !existing.has(c.id))?.id;
 }
 
 /* --- Schedule: dependencies and the critical path -------------------------------- */
@@ -464,6 +486,86 @@ export function useLogTime() {
     mutationFn: ({ taskId, minutes, note }: { taskId: string; minutes: number; note?: string }) =>
       api.post<TimeEntry>(`/tasks/${taskId}/time`, { minutes, note }).then((r) => r.data),
     onSuccess: (_entry, { taskId }) => client.invalidateQueries({ queryKey: keys.taskTime(taskId) })
+  });
+}
+
+/* --- Attachments ----------------------------------------------------------------------- */
+
+/**
+ * What the server will accept.
+ *
+ * Fetched once and cached for the session: it comes from the deployment's
+ * environment, so it cannot change while somebody has the app open. Knowing it
+ * client-side is what lets an oversized file be refused instantly instead of
+ * after a minute of uploading.
+ */
+export function useAttachmentConfig() {
+  return useQuery({
+    queryKey: keys.attachmentConfig,
+    queryFn: () => get<AttachmentConfig>('/attachments/config'),
+    staleTime: Infinity,
+    gcTime: Infinity
+  });
+}
+
+export function useAttachments(taskId: string | undefined) {
+  return useQuery({
+    queryKey: keys.attachments(taskId ?? ''),
+    queryFn: () => get<Attachment[]>(`/tasks/${taskId}/attachments`),
+    enabled: Boolean(taskId)
+  });
+}
+
+/**
+ * Uploads one file.
+ *
+ * multipart/form-data rather than a base64 JSON field: base64 inflates the
+ * body by a third and forces the whole file through a string in memory on both
+ * ends. `onProgress` is wired to axios so a large upload shows movement — a
+ * progress bar is the difference between "slow" and "frozen".
+ */
+export function useUploadAttachment() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      file,
+      commentId,
+      onProgress
+    }: {
+      taskId: string;
+      file: File;
+      commentId?: string;
+      onProgress?: (percent: number) => void;
+    }) => {
+      const form = new FormData();
+      form.append('file', file);
+      if (commentId) form.append('commentId', commentId);
+
+      return api
+        .post<Attachment>(`/tasks/${taskId}/attachments`, form, {
+          onUploadProgress: (event) => {
+            if (!onProgress || !event.total) return;
+            onProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        })
+        .then((r) => r.data);
+    },
+    onSuccess: (_attachment, { taskId }) => {
+      client.invalidateQueries({ queryKey: keys.attachments(taskId) });
+      client.invalidateQueries({ queryKey: keys.task(taskId) });
+    }
+  });
+}
+
+export function useDeleteAttachment() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; taskId: string }) => api.delete(`/attachments/${id}`),
+    onSuccess: (_data, { taskId }) => {
+      client.invalidateQueries({ queryKey: keys.attachments(taskId) });
+      client.invalidateQueries({ queryKey: keys.task(taskId) });
+    }
   });
 }
 

@@ -49,6 +49,14 @@ const (
 	ActionTaskDeleted   = "task.deleted"
 	ActionTaskCommented = "task.commented"
 
+	// Attachments are recorded because a file arriving and a file disappearing
+	// are both things somebody may later have to account for - and because the
+	// bytes themselves live outside this database, so the trail is the only
+	// place the two systems are tied together.
+	ActionAttachmentAdded    = "attachment.added"
+	ActionAttachmentDeleted  = "attachment.deleted"
+	ActionAttachmentInfected = "attachment.infected"
+
 	ActionTeamCreated = "team.created"
 	ActionTeamUpdated = "team.updated"
 	ActionTeamDeleted = "team.deleted"

@@ -144,6 +144,21 @@
     "watch": "Acompanhar",
     "unwatch": "Deixar de acompanhar"
   },
+  "attachments": {
+    "title": "Anexos",
+    "choose": "Escolher arquivos",
+    "dropHint": "ou arraste-os até aqui. Até {{limit}} por arquivo.",
+    "uploading": "Enviando",
+    "download": "Baixar {{name}}",
+    "delete": "Remover {{name}}",
+    "deleted": "Anexo removido.",
+    "tooLarge": "{{name}} passa do limite de {{limit}}.",
+    "scanning": "Verificando",
+    "attachToComment": "Anexar um arquivo a este comentário",
+    "commentUploadFailed": "O comentário foi publicado, mas os arquivos não puderam ser anexados a ele. Adicione-os à tarefa.",
+    "infected": "Bloqueado pelo antivírus",
+    "unavailable": "Anexos não estão disponíveis: esta instalação não tem armazenamento de objetos configurado."
+  },
   "myTasks": {
     "title": "Minhas tarefas",
     "empty": "Nada atribuído a você",
