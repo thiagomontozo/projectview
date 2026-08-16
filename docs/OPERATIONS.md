@@ -10,6 +10,46 @@ a backup nobody has restored is a hypothesis, not a backup.
 
 ---
 
+## First run
+
+The stack creates one administrator the first time it starts against an empty
+database, and nothing else. Everything below is what to do before anyone else
+can reach it.
+
+| | Default | Variable |
+|---|---|---|
+| Username | `admin` | `BOOTSTRAP_ADMIN_USERNAME` |
+| Password | `ChangeMe123!` | `BOOTSTRAP_ADMIN_PASSWORD` |
+| E-mail | `admin@example.com` | `BOOTSTRAP_ADMIN_EMAIL` |
+
+**These are published in the repository. Treat them as known to everybody.**
+
+1. **Set `BOOTSTRAP_ADMIN_PASSWORD` before the first start**, or change it
+   immediately after from **Settings → Password**. The variable is read only
+   against an empty database — once the account exists, editing `.env` does
+   nothing, which is the mistake worth knowing about in advance. Changing your
+   own password requires the current one even as an administrator, and ends
+   every other session the account has open.
+2. **Set `JWT_SECRET` to a long random value.** It signs every session token,
+   and it is also what the settings screen derives its encryption key from, so
+   rotating it later makes stored integration secrets unreadable (they are
+   dropped with a warning, not silently mangled — see below).
+3. **Set `POSTGRES_PASSWORD`**, and in production point `DATABASE_URL` at
+   credentials of your own with `sslmode=require`.
+4. **Install a real TLS certificate** in `proxy/certs/`. The self-signed
+   fallback exists so a local run works, not so a deployment can skip this.
+5. **Create a second administrator** from **Administration → Users**. The last
+   active administrator cannot be demoted or deactivated, which protects you
+   from a lockout — but it also means one administrator is a single point of
+   failure the day that person leaves.
+
+```bash
+# Confirm the account exists and nothing else was seeded by accident:
+docker compose exec -T postgres psql -U projectview -d projectview   -c "SELECT username, role, active FROM users;"
+```
+
+---
+
 ## Backup
 
 The only stateful component is PostgreSQL. The application containers hold

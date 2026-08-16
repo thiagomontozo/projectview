@@ -254,7 +254,14 @@
     "serviceTokensHint": "Credenciais de máquina para provisionamento SCIM e relatórios somente leitura. Só o hash é armazenado.",
     "tokenName": "Nome do token",
     "tokenCreated": "Token criado",
-    "tokenShownOnce": "Copie agora: este segredo não será mostrado de novo."
+    "tokenShownOnce": "Copie agora: este segredo não será mostrado de novo.",
+    "password": "Senha",
+    "passwordHint": "A senha atual é exigida mesmo para administradores. Ao trocar, todas as suas outras sessões são encerradas.",
+    "passwordManagedByAD": "Esta conta entra pelo Active Directory; a senha é gerenciada lá.",
+    "currentPassword": "Senha atual",
+    "newPassword": "Nova senha",
+    "changePassword": "Trocar senha",
+    "passwordChanged": "Senha alterada. Suas outras sessões foram encerradas."
   },
   "command": {
     "placeholder": "Buscar tarefas ou navegar...",
@@ -499,6 +506,8 @@
     "passwordReset": "Senha redefinida e sessões encerradas",
     "newPassword": "Nova senha",
     "passwordHint": "Mínimo de 8 caracteres.",
-    "singleAdminWarning": "Existe apenas um administrador ativo. Promova outra pessoa antes de rebaixar ou desativar essa conta — o sistema recusa a mudança que deixaria ninguém administrando."
+    "singleAdminWarning": "Existe apenas um administrador ativo. Promova outra pessoa antes de rebaixar ou desativar essa conta — o sistema recusa a mudança que deixaria ninguém administrando.",
+    "currentPassword": "Sua senha atual",
+    "resetOwnHint": "É a sua própria conta, então a senha atual é exigida — ser administrador não prova que é você no teclado. Suas outras sessões serão encerradas."
   }
 }

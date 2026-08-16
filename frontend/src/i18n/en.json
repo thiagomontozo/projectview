@@ -254,7 +254,14 @@
     "serviceTokensHint": "Machine credentials for SCIM provisioning and read-only reporting. Only the hash is stored.",
     "tokenName": "Token name",
     "tokenCreated": "Token created",
-    "tokenShownOnce": "Copy it now: this secret is never shown again."
+    "tokenShownOnce": "Copy it now: this secret is never shown again.",
+    "password": "Password",
+    "passwordHint": "The current password is required even for administrators. Changing it ends every other session you have open.",
+    "passwordManagedByAD": "This account signs in through Active Directory; its password is managed there.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "changePassword": "Change password",
+    "passwordChanged": "Password changed. Your other sessions have been ended."
   },
   "command": {
     "placeholder": "Search tasks or jump to...",
@@ -499,6 +506,8 @@
     "passwordReset": "Password reset and sessions ended",
     "newPassword": "New password",
     "passwordHint": "At least 8 characters.",
-    "singleAdminWarning": "There is only one active administrator. Promote somebody else before demoting or deactivating this account — the system refuses the change that would leave nobody administering."
+    "singleAdminWarning": "There is only one active administrator. Promote somebody else before demoting or deactivating this account — the system refuses the change that would leave nobody administering.",
+    "currentPassword": "Your current password",
+    "resetOwnHint": "This is your own account, so the current password is required — being an administrator does not prove you are the one at the keyboard. Your other sessions will be ended."
   }
 }

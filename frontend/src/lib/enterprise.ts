@@ -418,9 +418,18 @@ export function useSetUserActive() {
 
 export function useResetPassword() {
   return useMutation({
-    // An administrator resets without the old password; the server revokes
-    // every session the account holds when it happens.
-    mutationFn: ({ id, password }: { id: string; password: string }) =>
-      api.post(`/users/${id}/password`, { password })
+    // An administrator resets somebody else's password without the old one.
+    // On their OWN account the server still asks for the current password -
+    // being an administrator is not the same as having proved you are at the
+    // keyboard - so currentPassword is sent when the target is yourself.
+    mutationFn: ({
+      id,
+      password,
+      currentPassword
+    }: {
+      id: string;
+      password: string;
+      currentPassword?: string;
+    }) => api.post(`/users/${id}/password`, { password, currentPassword })
   });
 }

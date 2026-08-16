@@ -249,7 +249,12 @@ function UserRow({ person, isSelf, locale }: { person: User; isSelf: boolean; lo
           </Button>
         </div>
 
-        <ResetPasswordDialog open={resetting} person={person} onClose={() => setResetting(false)} />
+        <ResetPasswordDialog
+          open={resetting}
+          person={person}
+          isSelf={isSelf}
+          onClose={() => setResetting(false)}
+        />
       </td>
     </tr>
   );
@@ -258,23 +263,29 @@ function UserRow({ person, isSelf, locale }: { person: User; isSelf: boolean; lo
 function ResetPasswordDialog({
   open,
   person,
+  isSelf,
   onClose
 }: {
   open: boolean;
   person: User;
+  isSelf: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const toast = useToast();
   const reset = useResetPassword();
   const [password, setPassword] = useState('');
+  // Being an administrator is not the same as having proved you are at the
+  // keyboard, so the server asks for the current password on your own account
+  // even when it would not on anybody else's.
+  const [currentPassword, setCurrentPassword] = useState('');
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => !next && onClose()}
       title={t('users.resetPasswordFor', { name: person.name })}
-      description={t('users.resetHint')}
+      description={isSelf ? t('users.resetOwnHint') : t('users.resetHint')}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -291,10 +302,11 @@ function ResetPasswordDialog({
         onSubmit={(event) => {
           event.preventDefault();
           reset.mutate(
-            { id: person.id, password },
+            { id: person.id, password, currentPassword: isSelf ? currentPassword : undefined },
             {
               onSuccess: () => {
                 setPassword('');
+                setCurrentPassword('');
                 toast.success(t('users.passwordReset'));
                 onClose();
               },
@@ -303,6 +315,21 @@ function ResetPasswordDialog({
           );
         }}
       >
+        {isSelf && (
+          <Field label={t('users.currentPassword')} required>
+            {({ id }) => (
+              <Input
+                id={id}
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                required
+              />
+            )}
+          </Field>
+        )}
+
         <Field label={t('users.newPassword')} hint={t('users.passwordHint')} required>
           {({ id, describedBy }) => (
             <Input

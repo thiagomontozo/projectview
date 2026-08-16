@@ -234,10 +234,33 @@ whole REST surface remains exercisable with `curl`/Postman.
    The backend and frontend containers are deliberately **not** published to
    the host — they are reachable only through the proxy.
 
-4. First login: an admin account is created automatically on first run, using
-   the credentials from `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD`
-   (default: `admin` / `ChangeMe123!`). **Change this password immediately in
-   production** (endpoint `POST /api/users/:id/password`).
+4. **First sign-in.** An administrator account is created automatically the
+   first time the stack starts against an empty database:
+
+   | | Default | Variable |
+   |---|---|---|
+   | Username | `admin` | `BOOTSTRAP_ADMIN_USERNAME` |
+   | Password | `ChangeMe123!` | `BOOTSTRAP_ADMIN_PASSWORD` |
+   | E-mail | `admin@example.com` | `BOOTSTRAP_ADMIN_EMAIL` |
+   | Name | `Administrator` | `BOOTSTRAP_ADMIN_NAME` |
+
+   > ⚠️ **This password is published in this repository.** Change it before
+   > anyone else can reach the installation. Two ways:
+   >
+   > - **Before the first start**, set `BOOTSTRAP_ADMIN_PASSWORD` in `.env`.
+   >   It is only read against an empty database — on an installation that has
+   >   already been seeded, the account exists and the variable is ignored.
+   > - **After signing in**, from **Settings → Password**. The current password
+   >   is required even for an administrator: holding the role is not the same
+   >   as having proved you are the person at the keyboard. Every other session
+   >   the account has open is ended, so a leaked password stops working
+   >   immediately.
+
+   Create the rest of the accounts from **Administration → Users**, which is
+   also where you promote somebody to administrator. Keep at least two
+   administrators: the last active one cannot be demoted or deactivated, which
+   protects you from a lockout but also means a single administrator is a
+   single point of failure for offboarding.
 
 ### Building behind a TLS-intercepting network
 
@@ -609,7 +632,9 @@ the tool is safe to re-run.
 
 ## Security notes / suggested next steps
 
-- Change `JWT_SECRET` and the default admin password before any real use.
+- Change `JWT_SECRET` and the default admin password (`admin` /
+  `ChangeMe123!`, both published here) before any real use. The
+  [first-run checklist](docs/OPERATIONS.md#first-run) is the ordered version.
 - Install a real TLS certificate in `proxy/certs/` — the self-signed fallback
   is for local runs only.
 - Change `POSTGRES_PASSWORD` and use a `DATABASE_URL` with strong credentials

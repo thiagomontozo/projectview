@@ -16,11 +16,12 @@ import {
 } from '../lib/queries';
 import {
   useCreateServiceToken,
+  useResetPassword,
   useRevokeServiceToken,
   useServiceTokens,
   useUpdateUser
 } from '../lib/enterprise';
-import { downloadUrl } from '../lib/api';
+import { downloadUrl, errorMessage } from '../lib/api';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import { Shield, Monitor } from '../ui/icons';
 import controls from '../ui/controls.module.css';
@@ -94,6 +95,8 @@ export default function SettingsPage() {
       </div>
 
       <NotificationPreferencesCard />
+
+      <PasswordCard />
 
       <CapacityCard />
 
@@ -236,6 +239,92 @@ function NotificationPreferencesCard() {
             </select>
           </div>
         )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Changing your own password.
+ *
+ * The current one is required even for an administrator: holding the role is
+ * not the same as having proved you are the person at the keyboard. A
+ * successful change ends every other session the account has open, so a
+ * password changed because it leaked stops the leak immediately.
+ */
+function PasswordCard() {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { user } = useAuth();
+  const change = useResetPassword();
+
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+
+  // An AD account's password lives in the directory; offering a field here
+  // would promise something this application cannot deliver.
+  if (user?.authSource === 'ad') {
+    return (
+      <div className={styles.settingsSection}>
+        <Card>
+          <CardHeader title={t('settings.password')} />
+          <p className={styles.muted}>{t('settings.passwordManagedByAD')}</p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.settingsSection}>
+      <Card>
+        <CardHeader title={t('settings.password')} />
+        <p className={styles.muted}>{t('settings.passwordHint')}</p>
+
+        <form
+          style={{ display: 'grid', gap: 'var(--space-3)', maxWidth: 360 }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!user) return;
+            change.mutate(
+              { id: user.id, password: next, currentPassword: current },
+              {
+                onSuccess: () => {
+                  setCurrent('');
+                  setNext('');
+                  toast.success(t('settings.passwordChanged'));
+                },
+                onError: (error) => toast.error(errorMessage(error, t('errors.genericBody')))
+              }
+            );
+          }}
+        >
+          <label htmlFor="current-password">{t('settings.currentPassword')}</label>
+          <input
+            id="current-password"
+            className={controls.input}
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+            required
+          />
+
+          <label htmlFor="next-password">{t('settings.newPassword')}</label>
+          <input
+            id="next-password"
+            className={controls.input}
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            value={next}
+            onChange={(event) => setNext(event.target.value)}
+            required
+          />
+
+          <Button type="submit" variant="primary" loading={change.isPending} disabled={!current || !next}>
+            {t('settings.changePassword')}
+          </Button>
+        </form>
       </Card>
     </div>
   );
