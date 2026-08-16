@@ -1,0 +1,12 @@
+{
+  "name": "projectview-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-level tests. Kept out of frontend/ because they exercise the whole stack through the proxy, not the SPA in isolation.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

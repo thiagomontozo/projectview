@@ -44,9 +44,47 @@ It now refuses with `403`. Harmless to an attacker, who learns nothing either
 way; thoroughly misleading to anyone else, including an administrator editing
 their own profile.
 
-### 1.3 Browser-level tests (Playwright)
+### ✅ 1.3 Browser-level tests (Playwright) — done
 
-**The strongest evidence in this backlog is the recent history.**
+[`e2e/`](e2e/), 21 tests, wired into the `integration` job so they run against
+the composed stack on every push. **The pipeline can now see a screen.**
+
+Everything the item asked for is covered — sign-in, creating a project, moving
+a card, opening a task and changing its status, switching language, opening the
+settings screens — plus a sweep that opens all fourteen routes and asserts each
+renders a heading with no error boundary and no leaked translation keys. That
+sweep is the cheap one this item predicted would have caught all three defects.
+
+**Three decisions worth knowing:**
+
+- **It authenticates once.** The login endpoint is rate-limited to ten attempts
+  a minute on purpose, so a suite signing in per test would have started
+  measuring the limiter and failing for a reason unrelated to any screen.
+- **It finds things by role and label, not by CSS class.** Two of the three
+  defects were accessibility failures wearing another hat — a portalled listbox
+  painted behind its dialog, and labels that never resolved — so a test that
+  locates its targets the way a screen reader does is testing what actually
+  broke. It also means a class rename does not produce a red suite.
+- **The dropdown test clicks the option where it is painted.** Playwright
+  refuses a click on a covered element, so that click *is* the assertion that
+  nothing is on top of it. Setting the value programmatically would have passed
+  throughout the original defect.
+
+**The guards were verified by reintroducing the defects.** A listbox forced
+behind the dialog with `z-index: -1`, and a leaked key injected into the DOM:
+both turned the suite red, as they must. A browser suite that would have stayed
+green through the bugs that motivated it is worse than no suite, and the only
+way to know which one you have is to break it on purpose.
+
+**Not covered, and named rather than implied:** one browser (Chromium), no
+visual regression, and no mobile viewport. Chromium is what the defects
+happened in and what an internal tool is opened with; the other two are
+different disciplines with their own maintenance costs, worth taking on
+deliberately if they are ever wanted.
+
+### The history that motivated it
+
+**The strongest evidence in this backlog was the recent history.**
 
 Three defects in a row reached a user despite five green CI jobs, 316 API
 assertions and 48 frontend tests:
@@ -57,16 +95,15 @@ assertions and 48 frontend tests:
 | Every label showed as its own key in Portuguese | `nonExplicitSupportedLngs` against a region-qualified `supportedLngs` resolved to an empty language chain |
 | Status and priority selects did nothing | The dropdown was portalled out of the dialog and painted behind it |
 
-All three are invisible to an API test and obvious in a rendered page. Each now
-has a targeted guard, but the guards were written *after* the fact — the
-pipeline still cannot see a screen. The user administration screen that closed
-1.1 is covered the same way as everything before it: thoroughly at the API, not
-at all in a browser.
+All three are invisible to an API test and obvious in a rendered page. Each got
+a targeted guard at the time, but the guards were written *after* the fact —
+the pipeline could not see a screen at all, so the next defect of the same
+shape would have reached a user the same way.
 
-**Done means:** a Playwright suite in CI covering sign-in, creating a project,
-moving a card, opening a task and changing its status, switching language, and
-opening the settings screen. One test that loads the app and asserts a visible
-word would have caught all three above.
+Kept here rather than deleted with the item: the reasoning is why the suite is
+shaped the way it is, and the next person to wonder whether browser tests earn
+their maintenance should be able to read the three failures that paid for
+them.
 
 ---
 
@@ -271,22 +308,25 @@ doing only if somebody asks by name.
 
 ## Recommendation
 
-**1.3, then 2.2.** 2.1 is done — the load test exists and has run; what it
-found became 2.2.
+**2.2.** Priority 1 is empty: 1.1, 1.2 and 1.3 are all done, so the gaps that
+blocked ordinary use are closed and the pipeline can now see a screen.
 
-1.1, 1.2, 2.1 and 3.1 are done: an administrator can manage accounts from the
-interface, cannot accidentally leave the installation with nobody able to
-administer it, people can attach files to their work, and the performance
-claims are now measured rather than asserted.
+Done so far: an administrator can manage accounts from the interface and cannot
+accidentally leave the installation with nobody able to administer it (1.1,
+1.2); the browser suite runs on every push (1.3); the performance claims are
+measured rather than asserted (2.1); and people can attach files to their work
+(3.1).
 
-What remains at Priority 1 is the browser tests, and the case for them keeps
-getting stronger rather than weaker. The attachments screen that closed 3.1 is
-covered the same way as everything before it — thoroughly at the API, not at
-all in a browser — and it adds the two interactions the API cannot see at all:
-a drag-and-drop target and an upload progress bar. A file input that silently
-does nothing would pass all 316 assertions.
+**2.2 is next, and the order is not arbitrary.** It rewrites how six views
+fetch their data, which is exactly the kind of change that used to reach users
+broken — and it is now the first substantial change this project has made with
+a browser suite standing behind it. Doing it before 3.2 and 3.3 also matters:
+recurring tasks and templates both generate rows into the same views, so
+adding volume before fixing how volume is fetched makes the problem 2.1 just
+measured worse.
 
-Everything else below Priority 2 is a feature. Everything at Priority 1 is the
-difference between working software and software that works when tested — and
-2.2 is now the difference between software that works and software that works
-at the size somebody will actually load into it.
+One gap the new suite does not close, and worth stating plainly: attachments
+(3.1) shipped with a drag-and-drop target and an upload progress bar that
+nothing exercises in a browser. A file input that silently does nothing would
+still pass everything. It is small, and it belongs with whoever next touches
+that screen.

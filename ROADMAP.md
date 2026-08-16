@@ -454,8 +454,10 @@ rather than wrong-looking, which is how it survived this long.
 
 What is left at the top:
 
-- **Browser-level tests.** Every defect a user has actually hit was invisible to
-  the API tests and obvious in a rendered page.
+- ~~**Browser-level tests.**~~ Done: [`e2e/`](e2e/) runs 21 Playwright tests
+  against the composed stack on every push, so the pipeline can finally see a
+  screen. The guards were verified by reintroducing the defects that motivated
+  them and confirming the suite goes red.
 - **Moving the board off the unbounded listing.** The load test has been built
   and run; what it found is below, and the board is what M3 is waiting on.
 
@@ -536,8 +538,8 @@ person-weeks, the eight phases landed as **9 verified deliveries**.
 
 What the system is now, measured rather than asserted: **8 embedded migrations**
 applied on boot, **10 Go test packages**, **316 end-to-end assertions** against
-a real containerised stack, **48 frontend tests**, and **5 CI jobs** gating
-every push.
+a real containerised stack, **48 frontend tests**, **21 browser tests** driving
+the built bundle through the proxy, and **5 CI jobs** gating every push.
 
 The honest remaining risk is no longer that **M3** is unmeasured — it has been
 measured, and it failed. The board ships every task in the project in one

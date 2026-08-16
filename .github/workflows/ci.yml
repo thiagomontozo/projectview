@@ -108,7 +108,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: ShellCheck
         # Fails on warnings and errors; style/info notes are not gating.
-        run: shellcheck -S warning scripts/smoke-test.sh proxy/docker-entrypoint.sh
+        run: |
+          shellcheck -S warning \
+            scripts/smoke-test.sh \
+            scripts/loadtest/run.sh \
+            e2e/run.sh \
+            proxy/docker-entrypoint.sh
 
   integration:
     name: Integration (docker compose + smoke test)
@@ -138,6 +143,32 @@ jobs:
 
       - name: Smoke test
         run: bash scripts/smoke-test.sh https://localhost
+
+      # The pipeline could not see a screen until this step existed. Three
+      # defects reached users while every job here stayed green: a login page
+      # that rendered nothing, labels that showed as their own translation
+      # keys, and dropdowns painted behind the dialog that opened them. All
+      # three are invisible to an API assertion and obvious in a browser.
+      #
+      # Runs after the smoke test on purpose: if the API is broken, the browser
+      # failures that follow describe the symptom rather than the cause, and
+      # the shorter report is the one worth reading first.
+      - name: Browser tests
+        run: bash e2e/run.sh
+
+      - name: Browser test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          # Traces are recorded only for failures, so this is small unless
+          # something actually went wrong - and when it did, the trace is a
+          # replay of the session rather than a screenshot to squint at.
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Schema was created on first run
         run: |

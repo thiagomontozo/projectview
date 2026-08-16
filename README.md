@@ -665,6 +665,39 @@ trail, or touch a project it is not a member of — while confirming it still ca
 do the things a member legitimately should. It also proves a revoked token
 stops working immediately even though it is still cryptographically valid.
 
+**Browser tests** — Playwright against the running stack, through the proxy:
+
+```bash
+docker compose up -d
+e2e/run.sh                      # the whole suite
+e2e/run.sh board.spec.ts        # one file
+```
+
+21 tests. They exist because of a specific history: three defects reached users
+while every other job stayed green — a login screen that rendered nothing,
+every label showing as its own translation key, and the status and priority
+dropdowns doing nothing because Radix portalled the listbox behind the dialog
+that opened it. Each was invisible to an API assertion and obvious in a
+rendered page.
+
+So the suite is shaped around that rather than around re-verifying the API:
+
+| Guard | What it would have caught |
+|---|---|
+| Every route renders a heading, with no error boundary | A page that answers 200, mounts cleanly and paints nothing |
+| No visible text matches the *shape* of a translation key | The whole class of i18n resolution failures, not one string |
+| The status dropdown is opened, its option clicked where it is painted, and the change survives a reload | A control that is on the page and unreachable |
+| A card is dragged between columns with real pointer movement | dnd-kit's sensor never firing |
+| Sign-in, project creation, language switching, the settings screens | The flows the backlog named |
+
+Two properties worth knowing. It authenticates **once** and shares the session,
+because the login endpoint is rate-limited to ten attempts a minute and a suite
+that signed in per test would start measuring the limiter. And the guards were
+verified by reintroducing the defects — a listbox forced behind the dialog, a
+leaked key injected into the DOM — and confirming the tests go red, because a
+browser suite that would have stayed green through the original bugs is worse
+than none.
+
 **Load test** — k6 against the running stack with a project of 10,000 tasks:
 
 ```bash
@@ -717,6 +750,7 @@ pull request:
 | `gencert` | Builds the certificate helper and verifies the certificate it generates (SANs, validity, key) with `openssl` |
 | `frontend` | `npm ci`, TypeScript type-check, production build |
 | `shellcheck` | Lints the shell scripts |
+| `integration` → *browser tests* | Playwright against the composed stack, so the pipeline can finally see a screen |
 | `integration` | Brings the full stack up with Docker Compose, waits for every container to report healthy, runs the smoke test, asserts the tables, indexes and foreign keys were created in PostgreSQL, and restarts the backend to prove migrations are idempotent |
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes the
