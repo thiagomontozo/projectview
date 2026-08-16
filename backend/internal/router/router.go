@@ -242,6 +242,24 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 
 		r.Get("/{id}/attachments", api.ListAttachments)
 		r.Post("/{id}/attachments", api.UploadAttachment)
+
+		// The recurrence rule lives on the task currently carrying it, so it is
+		// read and written through that task rather than as a series of its own.
+		r.Get("/{id}/recurrence", api.GetRecurrence)
+		r.Put("/{id}/recurrence", api.SetRecurrence)
+		r.Delete("/{id}/recurrence", api.DeleteRecurrence)
+	})
+
+	// Templates. Listing is open to any authenticated user - a template is a
+	// suggestion, and one nobody can see is one nobody uses - while capturing,
+	// applying a project template and deleting are gated in the handlers, where
+	// the target scope is known.
+	r.Route("/api/templates", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/", api.ListTemplates)
+		r.Post("/", api.CreateTemplate)
+		r.Post("/{id}/apply", api.ApplyTemplate)
+		r.Delete("/{id}", api.DeleteTemplate)
 	})
 
 	// Attachments are addressed by their own id once they exist, because a

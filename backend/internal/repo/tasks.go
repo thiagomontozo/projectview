@@ -550,6 +550,15 @@ func (r *Tasks) AddComment(ctx context.Context, taskID, authorID uuid.UUID, body
 	return &c, nil
 }
 
+// SetRecurrenceParent records which instance a task was spawned from. Kept for
+// the trail rather than for the logic, so it is set after creation instead of
+// widening Create's signature for a column only one caller fills.
+func (r *Tasks) SetRecurrenceParent(ctx context.Context, taskID, parentID uuid.UUID) error {
+	_, err := r.store.Pool.Exec(ctx,
+		`UPDATE tasks SET recurrence_parent_id = $2 WHERE id = $1`, taskID, parentID)
+	return err
+}
+
 // CommentTask reports which task a comment belongs to, so a caller naming a
 // comment can be checked against the task it claims to be on rather than
 // trusted about it.

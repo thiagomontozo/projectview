@@ -212,7 +212,7 @@ Worth doing before 3.2 and 3.3: both add rows to the same views.
 
 ## Priority 3 — product features people will ask for
 
-*(3.1 is done; 3.2 and 3.3 remain.)*
+*(all three are done.)*
 
 ### ✅ 3.1 Attachments — done
 
@@ -275,19 +275,61 @@ equivalent hook and the permission model there is channel membership rather
 than project membership, so it is a second piece of work rather than a wider
 `WHERE` clause. It is listed under the smaller items below.
 
-### 3.2 Recurring tasks
+### ✅ 3.2 Recurring tasks — done
 
-A weekly report that has to be created by hand every week is the reason people
-keep using spreadsheets alongside the tool.
+Daily, weekly or monthly, with an interval ("every 2 weeks") and an optional end
+by date or by count. The rule lives on the instance currently carrying it and
+moves forward in one transaction, so a series never belongs to two tasks or to
+none — a delete-then-insert would leave a window where a crash loses the rule
+and the task silently stops recurring, which is the failure nobody notices
+until the report does not arrive.
 
-**Done means:** a recurrence rule on a task, the next instance created when the
-current one is completed or on schedule, and a clear answer for what happens to
-an instance nobody finished.
+**The question this item asked — what happens to an instance nobody finished —
+has one answer in both modes: it stays, and stays visible.** Nothing closes,
+deletes or reschedules it. What differs is what comes next:
 
-### 3.3 Templates
+- **`on_complete`** — the next one appears when this one is finished. Never
+  piles up, and stops entirely if nobody does the work, which is honest:
+  nothing was completed, so nothing came next.
+- **`on_schedule`** — the next one appears when due, whatever happened to the
+  last. Unfinished instances go overdue, so a month of ignored reports looks
+  like a month of ignored reports rather than one tidy row.
 
-Task, list and project templates, including the checklist and custom fields.
-Mostly a copy operation once the hierarchy exists, which it does.
+**And a neglected series does not catch up.** Six missed weeks produce one next
+date, not six new tasks piled on the one nobody did — burying the person who was
+already not doing it would be the obvious implementation and the wrong one.
+
+Two rules the date arithmetic encodes, both tested without a database:
+**monthly clamps rather than overflowing** (Go's `AddDate` turns 31 January into
+3 March, so a monthly task would drift a few days every short month), and the
+copy carries the *definition* of the work — title, assignees, checklist,
+unticked — while leaving behind everything belonging to one occurrence: the
+completion stamp, the comments arguing about last month's numbers, the time
+logged against it.
+
+### ✅ 3.3 Templates — done
+
+Task and project templates, with the checklist, tags and custom field values.
+A project template is **captured from a project that already exists** rather
+than described by hand, because describing twelve tasks in a form is not a
+feature anybody wants.
+
+Three decisions worth knowing:
+
+- **Dates are stored as offsets in days**, never as the dates they were. A
+  kickoff plan captured in March creates work dated from the week it is used.
+- **Assignees are not captured.** A template that silently allocates last
+  quarter's team is worse than one that allocates nobody.
+- **The body is a JSONB snapshot**, not a relational mirror of tasks and
+  checklists. A relational template would need migrating in step with every
+  column a task grows, and one captured a year ago would describe a task that no
+  longer exists; a snapshot is translated on application, and a field the
+  current schema does not recognise is ignored rather than failing the whole
+  thing.
+
+Capturing a template is gated like creating structure (`admin`/`manager`), since
+it shapes how work gets created; applying a *task* template only needs the right
+to work in the project it lands in.
 
 ---
 
@@ -354,17 +396,24 @@ doing only if somebody asks by name.
 
 ## Recommendation
 
-**3.2, then 3.3.** Priorities 1 and 2 are both empty.
+**Nothing is blocking.** Priorities 1, 2 and 3 are all done: account
+administration that cannot lock everybody out (1.1, 1.2), a browser suite on
+every push (1.3), performance measured rather than asserted (2.1), the board off
+the unbounded listing (2.2), attachments (3.1), recurring tasks (3.2) and
+templates (3.3).
 
-Done: account administration that cannot lock everybody out (1.1, 1.2); a
-browser suite on every push (1.3); performance measured rather than asserted
-(2.1); the board moved off the unbounded listing (2.2); and attachments (3.1).
+What remains at Priority 4 is platform work, and every item there is a
+deliberate deferral with a reason rather than an oversight. The honest reading
+is that **none of them should start without somebody asking for it**: SAML until
+a provider needs it, XLSX and PDF until named, point-in-time recovery when the
+operational commitment is wanted, and webhooks as a phase of their own.
 
-Recurring tasks and templates are next because they are what people ask for,
-and because the reason to hold them back is gone: both generate rows into the
-same views, and those views no longer load a whole project to show a screenful.
+**The one with a standing case is 4.2, more than one replica** — not because
+the load demands it today, but because both blockers are small, both are known,
+and neither gets easier later. The attachment sweeper added in 3.1 is already
+replica-safe; the WebSocket hub and the schedulers are not.
 
-**Three loose ends, none blocking, all small:**
+**Four loose ends, none blocking, all small and all named rather than implied:**
 
 - Grouping by assignee or priority in the list view, and the calendar, timeline
   and workload views, still draw from one loaded page. Each says so, and paging
@@ -374,3 +423,6 @@ same views, and those views no longer load a whole project to show a screenful.
 - Attachments shipped with a drag-and-drop target and an upload progress bar
   that no browser test exercises. A file input that silently did nothing would
   still pass everything.
+- The recurrence scheduler runs in every process with no lock, like the alert
+  and digest sweeps beside it — a second replica would spawn each instance
+  twice. Folded into 4.2, where the same advisory lock fixes all three.

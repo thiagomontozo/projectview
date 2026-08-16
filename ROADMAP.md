@@ -458,8 +458,11 @@ What is left at the top:
   against the composed stack on every push, so the pipeline can finally see a
   screen. The guards were verified by reintroducing the defects that motivated
   them and confirming the suite goes red.
-- **Moving the board off the unbounded listing.** The load test has been built
-  and run; what it found is below, and the board is what M3 is waiting on.
+- ~~**Moving the board off the unbounded listing.**~~ Done, and with it the
+  finding below. M3's threshold is still unmet and is recorded as such.
+- **Nothing else is blocking.** [BACKLOG.md](BACKLOG.md) Priorities 1 to 3 are
+  closed; Priority 4 is platform work, every item a deliberate deferral rather
+  than an oversight.
 
 ---
 
@@ -550,9 +553,9 @@ precisely the class of defect the 1.3 suite was added for.
 Every phase of the plan is done. Against the original estimate of ~30
 person-weeks, the eight phases landed as **9 verified deliveries**.
 
-What the system is now, measured rather than asserted: **8 embedded migrations**
-applied on boot, **10 Go test packages**, **316 end-to-end assertions** against
-a real containerised stack, **48 frontend tests**, **21 browser tests** driving
+What the system is now, measured rather than asserted: **9 embedded migrations**
+applied on boot, **10 Go test packages**, **339 end-to-end assertions** against
+a real containerised stack, **37 frontend tests**, **22 browser tests** driving
 the built bundle through the proxy, and **5 CI jobs** gating every push.
 
 The honest remaining risk is no longer that **M3** is unmeasured — it has been

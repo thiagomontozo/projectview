@@ -51,6 +51,8 @@ type API struct {
 	Privacy       *repo.Privacy
 	Settings      *repo.Settings
 	Attachments   *repo.Attachments
+	Recurrences   *repo.Recurrences
+	Templates     *repo.Templates
 	// Objects is the S3-compatible store holding attachment bytes. A nil value
 	// is valid and means the deployment has none: the attachment endpoints
 	// answer 503 and the rest of the application is unaffected.
@@ -103,5 +105,7 @@ func New(store *db.Store, cfg *config.Config, hub *ws.Hub, metrics *obs.Metrics)
 		Privacy:       repo.NewPrivacy(store),
 		Settings:      repo.NewSettings(store, cfg.JWT.Secret),
 		Attachments:   repo.NewAttachments(store),
+		Recurrences:   repo.NewRecurrences(store),
+		Templates:     repo.NewTemplates(store),
 	}
 }

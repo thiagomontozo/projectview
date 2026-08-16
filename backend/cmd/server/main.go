@@ -127,6 +127,14 @@ func main() {
 
 	services.NewDigestScheduler(api.Preferences, mailer).Start()
 
+	// Schedule-driven recurring tasks. The completion-driven ones need nothing
+	// here: they are spawned by the request that finishes the previous one.
+	services.NewRecurrenceScheduler(api.Recurrences, api.Tasks, services.TaskFactory{
+		Tasks:        api.Tasks,
+		CustomFields: api.CustomFields,
+		Recurrences:  api.Recurrences,
+	}).Start()
+
 	// Retention does nothing unless a policy is configured; see the comment on
 	// RetentionSweeper for why the default is to keep everything.
 	services.NewRetentionSweeper(api.Privacy, cfg).Start()

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import clsx from 'clsx';
 import Attachments, { AttachmentList, CommentAttachmentPicker } from './Attachments';
+import RecurrenceSection from './RecurrenceSection';
 import { Dialog, ConfirmDialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { Field, Input, Textarea } from '../ui/Field';
@@ -314,6 +315,9 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
         {/* Only once the task exists: a file has to be attached to something,
             and there is no id to attach it to before the first save. */}
         {isEdit && task && <Attachments taskId={task.id} />}
+
+        {/* Likewise: a recurrence rule needs a task to sit on. */}
+        {isEdit && task && <RecurrenceSection task={current ?? task} />}
 
         {isEdit && task && (
           <section>

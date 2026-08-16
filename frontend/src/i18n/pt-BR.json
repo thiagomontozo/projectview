@@ -527,5 +527,28 @@
     "singleAdminWarning": "Existe apenas um administrador ativo. Promova outra pessoa antes de rebaixar ou desativar essa conta — o sistema recusa a mudança que deixaria ninguém administrando.",
     "currentPassword": "Sua senha atual",
     "resetOwnHint": "É a sua própria conta, então a senha atual é exigida — ser administrador não prova que é você no teclado. Suas outras sessões serão encerradas."
+  },
+  "recurrence": {
+    "title": "Repetição",
+    "notRepeating": "Esta tarefa não se repete.",
+    "enable": "Fazer repetir",
+    "stop": "Parar de repetir",
+    "stopped": "Esta tarefa não se repete mais.",
+    "every": "A cada",
+    "daily": "dias",
+    "weekly": "semanas",
+    "monthly": "meses",
+    "whenLabel": "Quando a próxima aparece",
+    "mode_on_complete": "Quando esta for concluída",
+    "mode_on_complete_hint": "Nada se acumula. Se ninguém concluir, nada vem depois.",
+    "mode_on_schedule": "Na data de prazo, de qualquer forma",
+    "mode_on_schedule_hint": "Uma não concluída fica aberta e atrasa, então uma série negligenciada parece negligenciada.",
+    "occurrence": "Ocorrência {{count}}",
+    "next": "Próxima: {{date}}"
+  },
+  "templates": {
+    "startFrom": "Começar a partir de",
+    "blank": "Projeto em branco",
+    "willCreate": "O modelo também cria suas colunas de status e suas tarefas, datadas a partir de hoje."
   }
 }

@@ -527,5 +527,28 @@
     "singleAdminWarning": "There is only one active administrator. Promote somebody else before demoting or deactivating this account — the system refuses the change that would leave nobody administering.",
     "currentPassword": "Your current password",
     "resetOwnHint": "This is your own account, so the current password is required — being an administrator does not prove you are the one at the keyboard. Your other sessions will be ended."
+  },
+  "recurrence": {
+    "title": "Repeats",
+    "notRepeating": "This task does not repeat.",
+    "enable": "Make it repeat",
+    "stop": "Stop repeating",
+    "stopped": "This task no longer repeats.",
+    "every": "Every",
+    "daily": "days",
+    "weekly": "weeks",
+    "monthly": "months",
+    "whenLabel": "When the next one appears",
+    "mode_on_complete": "When this one is completed",
+    "mode_on_complete_hint": "Nothing piles up. If nobody finishes it, nothing comes next.",
+    "mode_on_schedule": "On its due date, regardless",
+    "mode_on_schedule_hint": "An unfinished one stays open and goes overdue, so a neglected series looks neglected.",
+    "occurrence": "Occurrence {{count}}",
+    "next": "Next: {{date}}"
+  },
+  "templates": {
+    "startFrom": "Start from",
+    "blank": "Blank project",
+    "willCreate": "The template also creates its status columns and its tasks, dated from today."
   }
 }

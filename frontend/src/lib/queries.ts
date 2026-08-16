@@ -87,6 +87,8 @@ export const keys = {
   taskTime: (taskId: string) => ['tasks', taskId, 'time'] as const,
   attachments: (taskId: string) => ['tasks', taskId, 'attachments'] as const,
   attachmentConfig: ['attachments', 'config'] as const,
+  recurrence: (taskId: string) => ['tasks', taskId, 'recurrence'] as const,
+  templates: (scope: string) => ['templates', scope] as const,
   runningTimer: ['time', 'running'] as const,
   thread: (messageId: string) => ['chat', 'thread', messageId] as const,
   presence: ['presence'] as const,
@@ -958,5 +960,109 @@ export function useCompletionTrend() {
   return useQuery({
     queryKey: keys.completionTrend,
     queryFn: () => get<CompletionTrendRow[]>('/dashboard/completion-trend')
+  });
+}
+
+/* --- Recurring tasks ------------------------------------------------------------
+ *
+ * The rule lives on the task currently carrying it, so it is read and written
+ * through that task. Completing an "on_complete" series produces the next
+ * instance server-side, which is why the mutations below invalidate the board
+ * as well as the task.
+ * ------------------------------------------------------------------------------ */
+
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly';
+export type RecurrenceMode = 'on_complete' | 'on_schedule';
+
+export interface Recurrence {
+  taskId: string;
+  frequency: RecurrenceFrequency;
+  intervalCount: number;
+  mode: RecurrenceMode;
+  untilDate?: string;
+  maxOccurrences?: number;
+  occurrences: number;
+  nextRunAt?: string;
+}
+
+export function useRecurrence(taskId: string | undefined) {
+  return useQuery({
+    queryKey: keys.recurrence(taskId ?? ''),
+    // The endpoint answers null for a task that does not repeat, which is an
+    // ordinary answer rather than a missing resource.
+    queryFn: () => get<Recurrence | null>(`/tasks/${taskId}/recurrence`),
+    enabled: Boolean(taskId)
+  });
+}
+
+export function useSetRecurrence() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, ...body }: { taskId: string } & Partial<Recurrence>) =>
+      api.put<Recurrence>(`/tasks/${taskId}/recurrence`, body).then((r) => r.data),
+    onSuccess: (_rule, { taskId }) => {
+      client.invalidateQueries({ queryKey: keys.recurrence(taskId) });
+      client.invalidateQueries({ queryKey: keys.task(taskId) });
+    }
+  });
+}
+
+export function useClearRecurrence() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => api.delete(`/tasks/${taskId}/recurrence`),
+    onSuccess: (_data, taskId) => {
+      client.invalidateQueries({ queryKey: keys.recurrence(taskId) });
+      client.invalidateQueries({ queryKey: keys.task(taskId) });
+    }
+  });
+}
+
+/* --- Templates ------------------------------------------------------------------ */
+
+export interface Template {
+  id: string;
+  name: string;
+  description: string;
+  kind: 'task' | 'project';
+  spaceId?: string;
+  createdAt: string;
+}
+
+export function useTemplates(kind?: 'task' | 'project') {
+  return useQuery({
+    queryKey: keys.templates(kind ?? 'all'),
+    queryFn: () => get<Template[]>('/templates', kind ? { kind } : undefined),
+    staleTime: 60_000
+  });
+}
+
+/** Captures an existing project, which is the path people actually use. */
+export function useCaptureTemplate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; description?: string; fromProjectId: string }) =>
+      api.post<Template>('/templates', { ...body, kind: 'project' }).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['templates'] })
+  });
+}
+
+export function useApplyTemplate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name?: string; key?: string; projectId?: string }) =>
+      api.post<{ project?: Project; tasksCreated?: number }>(`/templates/${id}/apply`, body).then((r) => r.data),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.projects });
+      client.invalidateQueries({ queryKey: keys.overview });
+    }
+  });
+}
+
+export function useDeleteTemplate() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/templates/${id}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['templates'] })
   });
 }

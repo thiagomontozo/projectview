@@ -565,6 +565,13 @@ func (a *API) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// The same completion hook as the board's move: a task can be finished from
+	// the dialog just as easily as by dragging it, and a series that only
+	// recurred from one of the two would look broken to whoever used the other.
+	if existing.CompletedAt == nil && updated.CompletedAt != nil {
+		a.spawnOnCompletion(r, updated)
+	}
+
 	httpx.JSON(w, http.StatusOK, a.populateTask(ctx, *updated, false))
 }
 
@@ -617,6 +624,15 @@ func (a *API) MoveTask(w http.ResponseWriter, r *http.Request) {
 			ActorID:        auth.CurrentUser(r).ID,
 			PreviousStatus: existing.Status,
 		})
+	}
+
+	// A completion-driven series produces its next instance here: the moment
+	// the work is finished is the only thing that defines "next" in that mode.
+	// Keyed on completedAt appearing rather than on the status name, because a
+	// project can call its final column whatever it likes - the repository is
+	// what decides a task is done.
+	if existing.CompletedAt == nil && t.CompletedAt != nil {
+		a.spawnOnCompletion(r, t)
 	}
 
 	httpx.JSON(w, http.StatusOK, t)

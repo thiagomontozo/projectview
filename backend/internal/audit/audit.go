@@ -57,6 +57,11 @@ const (
 	ActionAttachmentDeleted  = "attachment.deleted"
 	ActionAttachmentInfected = "attachment.infected"
 
+	// Templates shape how work gets created, so capturing and applying one is
+	// recorded like the structure it produces.
+	ActionTemplateCreated = "template.created"
+	ActionTemplateApplied = "template.applied"
+
 	ActionTeamCreated = "team.created"
 	ActionTeamUpdated = "team.updated"
 	ActionTeamDeleted = "team.deleted"

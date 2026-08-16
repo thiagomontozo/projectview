@@ -420,6 +420,66 @@ fi
 rm -rf "$attach_dir"
 
 # ---------------------------------------------------------------------------
+section "Recurring tasks"
+# The rule sits on the task carrying it, and moves forward with the series. What
+# is asserted is the behaviour, not the row: completing an instance produces the
+# next one, dated a period later, with the rule now on it and not on the old one.
+
+recur_task="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/tasks" -H "$AUTH" -H 'Content-Type: application/json'     -d '{"title":"Smoke weekly report","dueDate":"2026-08-17T09:00:00Z"}')"
+recur_id="$(json_str "$recur_task" id)"
+
+rule="$("${CURL[@]}" -X PUT "$BASE/api/tasks/$recur_id/recurrence" -H "$AUTH" -H 'Content-Type: application/json'     -d '{"frequency":"weekly","intervalCount":1,"mode":"on_complete"}')"
+contains "a weekly rule is stored"  "$rule" '"frequency":"weekly"'
+contains "a series starts its count at one" "$rule" '"occurrences":1'
+
+check "an unknown frequency is refused" "400"     "$(status_of -X PUT "$BASE/api/tasks/$recur_id/recurrence" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"frequency":"fortnightly"}')"
+# A scheduled series needs something to be late for; without a due date there is
+# nothing to fire on, so it is refused rather than given an invented date.
+nodate="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/tasks" -H "$AUTH" -H 'Content-Type: application/json' -d '{"title":"Smoke undated"}')"
+check "a scheduled series needs a due date" "400"     "$(status_of -X PUT "$BASE/api/tasks/$(json_str "$nodate" id)/recurrence" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"frequency":"weekly","mode":"on_schedule"}')"
+
+# Completing it is what produces the next one.
+check "the instance is completed" "200"     "$(status_of -X PATCH "$BASE/api/tasks/$recur_id/move" -H "$AUTH" -H 'Content-Type: application/json' -d '{"status":"done","order":0}')"
+
+after="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&q=Smoke%20weekly%20report&total=true")"
+contains "the next instance was created" "$after" '"total":2'
+contains "and it is dated a week later"  "$after" '"dueDate":"2026-08-24'
+
+# The rule moved on, so the finished instance no longer claims a future.
+finished_rule="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks/$recur_id/recurrence")"
+if printf '%s' "$finished_rule" | grep -q '"frequency"'; then
+    fail "the rule moves to the new instance" "the completed task still carries it"
+else
+    pass "the rule moves to the new instance"
+fi
+
+# ---------------------------------------------------------------------------
+section "Templates"
+
+tpl="$("${CURL[@]}" -X POST "$BASE/api/templates" -H "$AUTH" -H 'Content-Type: application/json'     -d "{\"name\":\"Smoke Kickoff $RUN_ID\",\"kind\":\"project\",\"fromProjectId\":\"$project_id\"}")"
+tpl_id="$(json_str "$tpl" id)"
+if [ -n "$tpl_id" ]; then
+    pass "a project can be captured as a template"
+else
+    fail "a project can be captured as a template" "$tpl"
+fi
+# Dates are captured as offsets, never as the dates they were: a plan captured
+# in August must not create work due in August next year.
+if printf '%s' "$tpl" | grep -q '"dueDate"'; then
+    fail "a template stores offsets, not dates" "$tpl"
+else
+    pass "a template stores offsets, not dates"
+fi
+
+applied="$("${CURL[@]}" -X POST "$BASE/api/templates/$tpl_id/apply" -H "$AUTH" -H 'Content-Type: application/json'     -d "{\"name\":\"Smoke From Template\",\"key\":\"SFT${RUN_ID}\"}")"
+contains "applying it creates a project" "$applied" '"tasksCreated"'
+applied_project="$(json_str "$applied" id)"
+
+check "listing templates" "200" "$(status_of -H "$AUTH" "$BASE/api/templates")"
+check "an unknown kind is refused" "400" "$(status_of -H "$AUTH" "$BASE/api/templates?kind=spreadsheet")"
+contains "capturing is audited" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=template.created")" "template.created"
+
+# ---------------------------------------------------------------------------
 section "Dashboard charts"
 for endpoint in overview status-breakdown workload-chart project-progress completion-trend; do
     check "dashboard/$endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/dashboard/$endpoint")"
@@ -1389,6 +1449,8 @@ check "smoke member deactivated" "200" \
 # Keeps repeated local runs from piling up fixtures in the dev database.
 check "smoke task deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/tasks/$task_id")"
 check "smoke project deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/projects/$project_id")"
+check "template project deleted" "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/projects/$applied_project")"
+check "smoke template deleted"   "200" "$(status_of -X DELETE -H "$AUTH" "$BASE/api/templates/$tpl_id")"
 
 # ---------------------------------------------------------------------------
 section "API rate limiting"

@@ -62,6 +62,21 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
   fetches the object directly. Nothing in the bucket is public. Deleting an
   attachment deletes the object, and so does deleting the task, the project or
   the whole space that contained it.
+- **Recurring tasks** — a task can repeat daily, weekly or monthly. The rule
+  lives on the instance currently carrying it and moves forward with the
+  series, so there is never a second place to look for what happens next. Two
+  modes, and the difference is what happens when nobody does the work: **when
+  completed** never piles up and stops if the chain stops, while **on schedule**
+  produces the next one regardless and leaves the unfinished one open and
+  overdue. Neither ever closes, deletes or silently reschedules an instance
+  nobody finished. A neglected series does not catch up either — six missed
+  weeks produce one next date, not six new tasks on top of the one nobody did.
+- **Templates** — task and project templates, including the checklist, tags and
+  custom field values. A project is captured from one that already exists
+  rather than described by hand, and its dates are stored as **offsets in days**
+  so a plan captured in March creates work dated from the week it is used.
+  Assignees are deliberately not captured: a template that silently allocates
+  last quarter's team is worse than one that allocates nobody.
 - **Custom fields** — typed per project or space (text, number, date, select,
   multi-select, checkbox, url, email, user), stored as JSONB with a GIN index.
 - **Time tracking** — a timer (one per person, enforced by the database),
@@ -450,6 +465,10 @@ where the target document is available, and gated by role in
 | Attach a file to a task | Project members (owner counts), or `admin` |
 | Remove your own attachment | The uploader, with the right to change the task |
 | Remove someone else's attachment | Project owner, a `manager` who is a member, or `admin` |
+| Make a task repeat | Project members (owner counts), or `admin` |
+| Capture or delete a template | `admin`, `manager` |
+| Apply a task template into a project | Project members, or `admin` |
+| Apply a project template (it creates a project) | `admin`, `manager` |
 | Create accounts, assign roles, deactivate users | `admin` |
 | Reset someone else's password | `admin` |
 | Change your own password | You, **proving the current password** |
@@ -616,7 +635,7 @@ docker compose up -d --build
 scripts/smoke-test.sh                 # defaults to https://localhost
 ```
 
-316 assertions covering the proxy (HTTPS redirect, security headers, the
+339 assertions covering the proxy (HTTPS redirect, security headers, the
 backend not being reachable from the host), authentication and session
 revocation, the first-run schema and seed, the Space/Folder/List hierarchy,
 projects/tasks/sub-tasks with resource allocation and dates, the kanban move
@@ -790,6 +809,13 @@ the tool is safe to re-run.
   and emoji, so toggling cannot duplicate) and the record of who was named.
 - **Doc / DocRevision** — Markdown documents scoped to a space or a project,
   with a snapshot kept for every save that changed the text.
+- **Recurrence** — the rule that makes a task come back, keyed by the task
+  currently carrying it. Moving it to the next instance is one transaction, so
+  a series never belongs to two tasks or to none.
+- **Template** — a reusable shape of work, stored as a JSONB snapshot rather
+  than a relational mirror of tasks and checklists. A relational template would
+  need migrating in step with every column a task grows, and one captured a
+  year ago would then describe a task that no longer exists.
 - **Attachment** — metadata for a file on a task or a comment: the name as
   uploaded, the content type decided from the bytes, the size, a SHA-256 and
   the scan status. The storage key is the object's address and never leaves the
