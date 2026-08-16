@@ -665,6 +665,47 @@ trail, or touch a project it is not a member of — while confirming it still ca
 do the things a member legitimately should. It also proves a revoked token
 stops working immediately even though it is still cryptographically valid.
 
+**Load test** — k6 against the running stack with a project of 10,000 tasks:
+
+```bash
+docker compose up -d
+scripts/loadtest/run.sh              # seeds the fixture, then measures
+scripts/loadtest/run.sh --clean      # removes the fixture afterwards
+```
+
+The fixture is applied as SQL rather than through the API, deliberately:
+performance at size is a statement about *reads*, so building ten thousand
+tasks is a precondition rather than part of the measurement, and a benchmark
+too slow to repeat is one nobody runs twice.
+
+It reports p95 per endpoint rather than one aggregate, because a fast search
+would otherwise hide a slow board inside the same number. Two profiles run:
+what ships today, and the same page fetched a column at a time through the
+paginated endpoint — so the recommendation in the backlog rests on a measured
+number rather than an argument. **The results, including the one it fails, are
+in [ROADMAP.md](ROADMAP.md#m3--the-load-test-and-what-it-found).**
+
+## Known limits at scale
+
+Measured rather than guessed, and named here rather than left for somebody to
+discover:
+
+- **A single very large project will feel the board.**
+  `GET /api/projects/:id/tasks` returns every task in the project in one
+  response — measured at 10,000 tasks: 10.1 MB, 1.6 s on its own and about
+  nine seconds under concurrent use. Cost is linear in the task count, so a
+  project of a thousand costs about a tenth of that; the point where it stops
+  being comfortable is somewhere in between, and that part is arithmetic rather
+  than measurement. The fix is scoped as [BACKLOG 2.2](BACKLOG.md); the
+  paginated endpoint it needs already exists and answers a kanban column in
+  under 130 ms.
+- **Search, by contrast, holds.** Full-text over 10,000 tasks answers a page of
+  50 in 49 ms, which is what the `tsvector` column and its GIN index were built
+  for.
+- **One backend replica.** The WebSocket hub is per-process and the schedulers
+  hold no lock; both are explained in
+  [docs/OPERATIONS.md](docs/OPERATIONS.md#running-more-than-one-instance).
+
 ## CI/CD
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and

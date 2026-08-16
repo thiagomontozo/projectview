@@ -199,7 +199,7 @@ filter means the same thing everywhere.
 | View | What it is for |
 |---|---|
 | **Board** | Kanban, drag between columns (existing) |
-| **List** | Grouped by status, assignee or priority; virtualised, so ten thousand rows scroll |
+| **List** | Grouped by status, assignee or priority; virtualised, so ten thousand rows scroll — though *fetching* those ten thousand is the ceiling [M3 later found](#m3--the-load-test-and-what-it-found) |
 | **Table** | Spreadsheet-style inline editing of title, status, priority and due date |
 | **Calendar** | Month grid of tasks on their due dates |
 | **Timeline** | Gantt bars from start to due date, dragged to reschedule; zero-duration tasks render as milestone diamonds |

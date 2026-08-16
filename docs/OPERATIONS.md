@@ -1,8 +1,8 @@
 # Operations
 
 Running ProjectView as an internal service: backup and restore, retention,
-provisioning, single sign-on, and what has to change to run more than one
-instance.
+provisioning, single sign-on, what has to change to run more than one
+instance, and the capacity figures a deployment can be sized against.
 
 Everything here is written to be executed, not admired. Each procedure states
 what it assumes, and the restore procedure states how to verify it worked —
@@ -359,6 +359,45 @@ one.
 For PostgreSQL itself, use your platform's managed high availability rather
 than building it here. The application needs one connection string; how many
 machines are behind it is not its concern.
+
+---
+
+## Capacity: what has been measured
+
+Numbers rather than adjectives, so a deployment can be sized against something.
+All from `scripts/loadtest/run.sh` — 10,000 tasks in one project, ten
+concurrent users — against the bundled stack on one machine. Re-run it on your
+own hardware before treating any of it as a promise.
+
+| Path | p95 | Note |
+|---|---|---|
+| Search (`/api/tasks?q=`) | 49 ms | Holds. This is what the `tsvector` column and its GIN index were for. |
+| Dashboard aggregations | ~45 ms | |
+| Workload report | 118 ms | Fans out per person; grows with headcount, not with tasks. |
+| Capacity report | 150 ms | |
+| Timeline (`/schedule`) | 181 ms | Grows with the number of dependencies, not tasks. |
+| **Board (`/projects/:id/tasks`)** | **9.06 s** | **Returns every task in the project — 10.1 MB at 10,000 tasks.** |
+
+**The one that matters operationally is the board.** It is not a tuning
+problem: the query is 130 ms and the rest is producing and shipping ten
+thousand objects, so no index, no connection-pool setting and no larger machine
+changes its shape. What it means in practice:
+
+- **The ceiling is per project, not per installation.** A hundred projects of
+  two hundred tasks each is not this situation. Only one oversized project is.
+  The cost is linear in that project's task count — the 10,000-task figure is
+  measured, the smaller ones are that figure divided, so treat them as
+  arithmetic rather than as results.
+- **Above it, the symptom is not only a slow board.** That response saturates
+  the process, so search and the reports slow down beside it even though
+  nothing is wrong with them. If people report "the whole system is slow", look
+  for one very large project before looking at the database.
+- **The mitigation until it is fixed** is to split oversized projects — which
+  the Space → Folder → List hierarchy already supports — rather than to add
+  hardware.
+
+`/metrics` labels by route pattern, so `GET /api/projects/{projectId}/tasks` is
+the series to watch; it will show the problem long before anybody reports it.
 
 ---
 
