@@ -122,22 +122,39 @@ func main() {
 	// is attached after both exist rather than built inside handlers.New.
 	api.Engine = services.NewAutomationEngine(api.Automations, api.Tasks, api.Watchers, notifier)
 
+	// Every timer-driven sweep below runs inside every backend process, so with
+	// a second replica each would fire twice: every alert, every digest, every
+	// recurring task. A PostgreSQL advisory lock per sweep makes each one run
+	// once across the installation, which is what the runbook named as the
+	// blocker to scaling out.
 	alertScheduler := services.NewAlertScheduler(api.Tasks, cfg, notifier, api.Engine)
+	alertScheduler.Guard = services.NewSweepGuard(store, db.LockAlerts)
 	alertScheduler.Start()
 
-	services.NewDigestScheduler(api.Preferences, mailer).Start()
+	digests := services.NewDigestScheduler(api.Preferences, mailer)
+	digests.Guard = services.NewSweepGuard(store, db.LockDigests)
+	digests.Start()
 
 	// Schedule-driven recurring tasks. The completion-driven ones need nothing
 	// here: they are spawned by the request that finishes the previous one.
-	services.NewRecurrenceScheduler(api.Recurrences, api.Tasks, services.TaskFactory{
+	recurrence := services.NewRecurrenceScheduler(api.Recurrences, api.Tasks, services.TaskFactory{
 		Tasks:        api.Tasks,
 		CustomFields: api.CustomFields,
 		Recurrences:  api.Recurrences,
-	}).Start()
+	})
+	recurrence.Guard = services.NewSweepGuard(store, db.LockRecurrence)
+	recurrence.Start()
 
 	// Retention does nothing unless a policy is configured; see the comment on
 	// RetentionSweeper for why the default is to keep everything.
-	services.NewRetentionSweeper(api.Privacy, cfg).Start()
+	retention := services.NewRetentionSweeper(api.Privacy, cfg)
+	retention.Guard = services.NewSweepGuard(store, db.LockRetention)
+	retention.Start()
+
+	// Handed to the API so saving a new cron expression rebuilds the schedule
+	// instead of waiting for a redeploy.
+	api.Alerts = alertScheduler
+	api.Retention = retention
 
 	if cfg.OIDC().Enabled {
 		api.OIDC = auth.NewOIDC(cfg)

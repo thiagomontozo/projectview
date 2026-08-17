@@ -61,14 +61,24 @@ func (r *Dependencies) Remove(ctx context.Context, taskID, dependsOnID uuid.UUID
 	return nil
 }
 
-// ForProject returns every edge inside a project, which is what the timeline
-// needs to draw the arrows in one request.
-func (r *Dependencies) ForProject(ctx context.Context, projectID uuid.UUID) ([]Dependency, error) {
+// ForProject returns the edges inside a project.
+//
+// When `visible` is non-empty only edges with **both ends** in that set are
+// returned, which is what the timeline actually needs: an arrow is drawn
+// between two bars, so an edge with one end off-screen has nothing to connect
+// and is only weight on the wire. Measured at 2,000 edges the whole-project
+// answer was 512 KB and the slowest endpoint in the load test.
+//
+// An empty set still means the whole project, so every existing caller - and
+// anything that genuinely wants the full graph, like an export - is unchanged.
+func (r *Dependencies) ForProject(ctx context.Context, projectID uuid.UUID, visible []uuid.UUID) ([]Dependency, error) {
 	rows, err := r.store.Pool.Query(ctx, `
 		SELECT d.task_id, d.depends_on_id, d.type, d.lag_days, d.created_at
 		  FROM task_dependencies d
 		  JOIN tasks t ON t.id = d.task_id
-		 WHERE t.project_id = $1`, projectID)
+		 WHERE t.project_id = $1
+		   AND (COALESCE(cardinality($2::uuid[]), 0) = 0
+		        OR (d.task_id = ANY($2) AND d.depends_on_id = ANY($2)))`, projectID, visible)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +131,12 @@ type BlockedTask struct {
 
 // Blocked lists tasks in a project whose predecessors are not done yet. This
 // is the practical half of dependencies: knowing what cannot be started today.
-func (r *Dependencies) Blocked(ctx context.Context, projectID uuid.UUID) ([]BlockedTask, error) {
+// Blocked lists tasks waiting on something unfinished.
+//
+// Scoped by the same visible set as the edges, and for the same reason: the
+// timeline marks the bars it draws. The blocker's title is carried because the
+// bar it belongs to may be off-screen even when the blocked task is not.
+func (r *Dependencies) Blocked(ctx context.Context, projectID uuid.UUID, visible []uuid.UUID) ([]BlockedTask, error) {
 	rows, err := r.store.Pool.Query(ctx, `
 		SELECT d.task_id, blocker.id, blocker.title
 		  FROM task_dependencies d
@@ -129,7 +144,8 @@ func (r *Dependencies) Blocked(ctx context.Context, projectID uuid.UUID) ([]Bloc
 		  JOIN tasks blocker ON blocker.id = d.depends_on_id
 		 WHERE t.project_id = $1
 		   AND t.status <> 'done'
-		   AND blocker.status <> 'done'`, projectID)
+		   AND blocker.status <> 'done'
+		   AND (COALESCE(cardinality($2::uuid[]), 0) = 0 OR d.task_id = ANY($2))`, projectID, visible)
 	if err != nil {
 		return nil, err
 	}

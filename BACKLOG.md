@@ -342,17 +342,25 @@ fails silently is worse than no webhook, so this needs retry with backoff, a
 delivery log an operator can inspect, and HMAC signing with a rotatable secret.
 That is a phase of its own.
 
-### 4.2 More than one replica
+### 4.2 More than one replica — half done
 
-Named honestly in [docs/OPERATIONS.md](docs/OPERATIONS.md) rather than glossed
-over. Two blockers, both small and both real:
+- ✅ **The schedulers now hold a lock.** Alerts, digests, retention and the
+  recurrence sweep each take a PostgreSQL *session* advisory lock before
+  running, so a sweep runs once across the installation instead of once per
+  process. `pg_try_advisory_lock` never waits: a replica that finds the lock
+  taken skips that tick, because a sweep already running is a sweep already
+  happening and queueing behind it would only run it twice in a row.
 
-- **The WebSocket hub is per-process.** A message published on one replica is
-  not pushed to clients connected to another. Needs a shared bus; Redis pub/sub
-  is the usual answer.
-- **The schedulers have no lock.** Alerts, digests and retention run in every
-  process, so two replicas send some notifications twice. A PostgreSQL advisory
-  lock is enough.
+  The honest bound: a process killed mid-sweep releases its lock when the
+  connection dies, and another replica may repeat the work on the next tick.
+  That turns "always duplicated" into "duplicated only if a process dies
+  mid-sweep". The attachment object sweeper is deliberately *not* locked —
+  deleting an object is idempotent, so two replicas duplicate work rather than
+  corrupt anything.
+
+- ⬜ **The WebSocket hub is still per-process.** A message published on one
+  replica is not pushed to clients connected to another. Needs a shared bus;
+  Redis pub/sub is the usual answer, and it is the one remaining blocker.
 
 ### 4.3 SAML
 
@@ -415,20 +423,43 @@ account" explicitly, so configuring AD no longer breaks every test.
 
 ## Smaller items
 
-- **Alert and retention cron expressions are not editable** from the settings
-  screen. They are read when the scheduler is built, so changing one needs a
-  restart, and a field that silently does nothing until the next deploy is
-  worse than no field. Making the schedulers rebuildable would close it.
+- ✅ **Alert and retention cron expressions are editable.** The schedules are
+  now rebuildable: saving a new expression stops the old cron and starts one
+  against the current configuration, so the field changes the timetable instead
+  of waiting for the next deploy. `Stop()` lets a sweep already running finish
+  rather than cutting a half-sent batch of alerts off mid-flight.
 - **Chat has no attachments and no editing**, though the schema has an
   `edited_at` column waiting for it. Tasks have attachments now (3.1) and the
   object storage is in place, so the remaining work is the permission side:
   a chat file is gated by channel membership rather than by project membership,
   which is a different resolution path rather than a wider query.
-- **No rich-text editor.** Descriptions and comments are plain text; documents
-  are Markdown. A deliberate choice, revisit only if it becomes a complaint.
+- ✅ **Rich text on descriptions and comments.** It became a complaint, which
+  was the stated trigger. TipTap over ProseMirror, MIT. **Documents keep
+  Markdown** — the original reasoning still holds there: it stays greppable,
+  diffable and portable, and a proprietary model would be a format the database
+  has to understand. What changed is the places where the alternative was not
+  Markdown but a bare textarea.
+
+  Stored as HTML, which keeps it a bounded change: the column is already text
+  and plain text is valid HTML, so everything written before renders unchanged.
+  Reading is done through a **read-only editor rather than
+  `dangerouslySetInnerHTML`**, and that is the security boundary: the column
+  takes whatever an API client PUTs, so injecting it into the DOM would be
+  stored cross-site scripting run by every reader. ProseMirror keeps only what
+  its schema can represent, which is a stronger guarantee than a deny-list.
+  Asserted: a script tag, an inline handler and an iframe are all dropped while
+  the legitimate formatting and old plain text survive.
+
+  Not offered, deliberately: images, tables, colours, fonts. Those turn a
+  description into a document, and this application already has documents.
+
+  *Oasis Editor was asked for and not used*: the repository declares no licence
+  at all, which makes it all-rights-reserved by default and not something to put
+  in a corporate deployment. It also pulls Solid into a React bundle and is
+  pre-1.0.
 - **Intake forms** — the last unbuilt item from the collaboration phase.
-- **Coverage is unmeasured on the frontend.** The backend reports it in CI; the
-  frontend does not.
+- ✅ **Frontend coverage is measured in CI**, alongside the backend's. A number
+  existed for half the codebase and the other half was unmeasured.
 
 ---
 
@@ -451,16 +482,20 @@ the load demands it today, but because both blockers are small, both are known,
 and neither gets easier later. The attachment sweeper added in 3.1 is already
 replica-safe; the WebSocket hub and the schedulers are not.
 
-**Four loose ends, none blocking, all small and all named rather than implied:**
+**What is actually left, and nothing here blocks use:**
 
-- Grouping by assignee or priority in the list view, and the calendar, timeline
-  and workload views, still draw from one loaded page. Each says so, and paging
-  them by group is a contained change now that the server can count.
-- The timeline returns every dependency in one response — 512 KB on a
-  2,000-edge project, and now the slowest endpoint in the load test.
-- Attachments shipped with a drag-and-drop target and an upload progress bar
-  that no browser test exercises. A file input that silently did nothing would
-  still pass everything.
-- The recurrence scheduler runs in every process with no lock, like the alert
-  and digest sweeps beside it — a second replica would spawn each instance
-  twice. Folded into 4.2, where the same advisory lock fixes all three.
+- **The WebSocket hub is per-process** — the last blocker to a second replica,
+  and the only item with a standing case for doing it before somebody asks.
+- **Chat has no attachments and no editing.** The object storage is in place;
+  the work is the permission side, which is channel membership rather than
+  project membership.
+- **Intake forms** — the last unbuilt item from the collaboration phase.
+- **Grouping by assignee or priority in the list view, and the calendar,
+  timeline and workload views, still draw from one loaded page.** Each says so
+  on screen; paging them by group is contained now that the server can count.
+- **Attachments have no browser coverage** on the drag-and-drop target or the
+  upload progress bar. A file input that silently did nothing would still pass
+  everything.
+- **M3 remains unmet at 407 ms against 100 ms.** Every unbounded read is now
+  bounded; what is left is the cost of a synthetic load heavier than a board
+  page in real use.

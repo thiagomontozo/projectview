@@ -563,5 +563,20 @@
     "startFrom": "Start from",
     "blank": "Blank project",
     "willCreate": "The template also creates its status columns and its tasks, dated from today."
+  },
+  "richText": {
+    "formatting": "Formatting",
+    "bold": "Bold",
+    "boldShort": "B",
+    "italic": "Italic",
+    "italicShort": "I",
+    "strike": "Strikethrough",
+    "strikeShort": "S",
+    "code": "Code",
+    "codeShort": "</>",
+    "bulletList": "Bulleted list",
+    "bulletListShort": "••",
+    "orderedList": "Numbered list",
+    "orderedListShort": "1."
   }
 }

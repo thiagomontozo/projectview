@@ -563,5 +563,20 @@
     "startFrom": "Começar a partir de",
     "blank": "Projeto em branco",
     "willCreate": "O modelo também cria suas colunas de status e suas tarefas, datadas a partir de hoje."
+  },
+  "richText": {
+    "formatting": "Formatação",
+    "bold": "Negrito",
+    "boldShort": "N",
+    "italic": "Itálico",
+    "italicShort": "I",
+    "strike": "Tachado",
+    "strikeShort": "S",
+    "code": "Código",
+    "codeShort": "</>",
+    "bulletList": "Lista com marcadores",
+    "bulletListShort": "••",
+    "orderedList": "Lista numerada",
+    "orderedListShort": "1."
   }
 }

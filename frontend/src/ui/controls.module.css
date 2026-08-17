@@ -328,3 +328,93 @@
   color: var(--text);
   box-shadow: var(--shadow-xs);
 }
+
+/* --- Rich text ---------------------------------------------------------------
+   Deliberately borrows the input's own border and focus treatment, so a rich
+   field sits in a form beside plain ones without looking like a different
+   product. */
+.richText {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.richText:focus-within {
+  border-color: var(--accent);
+}
+
+.richTextToolbar {
+  display: flex;
+  gap: 2px;
+  padding: var(--space-1);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  flex-wrap: wrap;
+}
+
+.richTextButton {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.richTextButton:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+/* The pressed state is carried by aria-pressed as well; this is only its
+   visual half. */
+.richTextButtonActive {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.richTextArea {
+  min-height: 96px;
+  padding: var(--space-3);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  outline: none;
+}
+
+.richTextArea p {
+  margin: 0 0 var(--space-2);
+}
+
+.richTextArea p:last-child {
+  margin-bottom: 0;
+}
+
+.richTextArea ul,
+.richTextArea ol {
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.richTextArea code {
+  background: var(--surface-hover);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 0.92em;
+}
+
+.richTextArea a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Reading view: no chrome, no minimum height — it sits inline in a card. */
+.richTextReadOnly :global(.ProseMirror) {
+  min-height: 0;
+  padding: 0;
+  outline: none;
+}

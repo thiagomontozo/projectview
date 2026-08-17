@@ -161,6 +161,17 @@ func (a *API) reloadSettings(ctx context.Context) string {
 		a.OIDC.ForgetDiscovery()
 	}
 
+	// The cron expressions are read when a schedule is built, so applying the
+	// new configuration is not enough on its own - the schedules have to be
+	// rebuilt against it. Without this the field would accept a value and go on
+	// running the old timetable until the next deploy.
+	if a.Alerts != nil {
+		a.Alerts.Restart()
+	}
+	if a.Retention != nil {
+		a.Retention.Restart()
+	}
+
 	if err := a.EnvMirror.Write(a.Cfg.Effective()); err != nil {
 		logger.Warn("settings: mirror not written: %v", err)
 		return "Saved and applied, but the .env mirror could not be written: " + err.Error()

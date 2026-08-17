@@ -20,6 +20,8 @@ import (
 // week) they arrive as one message instead of forty. It is also where mail
 // suppressed by quiet hours resurfaces.
 type DigestScheduler struct {
+	Guard *SweepGuard
+
 	preferences *repo.Preferences
 	mailer      *Mailer
 }
@@ -34,9 +36,11 @@ func NewDigestScheduler(preferences *repo.Preferences, mailer *Mailer) *DigestSc
 func (s *DigestScheduler) Start() {
 	c := cron.New()
 	if _, err := c.AddFunc("5 * * * *", func() {
-		if err := s.Run(context.Background()); err != nil {
-			logger.Error("digest sweep failed: %v", err)
-		}
+		s.Guard.Do(context.Background(), "Digests", func(ctx context.Context) {
+			if err := s.Run(ctx); err != nil {
+				logger.Error("digest sweep failed: %v", err)
+			}
+		})
 	}); err != nil {
 		logger.Error("invalid digest cron expression: %v", err)
 		return

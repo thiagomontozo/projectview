@@ -491,26 +491,37 @@ columns below are measured, the first against the shape that shipped before it.
 
 | Endpoint | p95 before | p95 now | Isolated, one request |
 |---|---|---|---|
-| Board (`/projects/:id/tasks` → a page per column) | **9.06 s** | **483 ms** | 126 ms |
-| List (same collection) | **8.88 s** | 312 ms | 52 ms |
-| Search (`/tasks?q=`) | 748 ms | 249 ms | **49 ms** ✅ |
-| Timeline (`/projects/:id/schedule`) | 1.12 s | 755 ms | 181 ms |
-| Workload (`/users/workload`) | 698 ms | 249 ms | 118 ms |
-| Data transferred over the run | 814 MB | 256 MB | — |
-| Requests served in the run | 196 | **2,017** | — |
+| Board (`/projects/:id/tasks` → a page per column) | **9.06 s** | **407 ms** | 126 ms |
+| List (same collection) | **8.88 s** | 285 ms | 52 ms |
+| Search (`/tasks?q=`) | 748 ms | 181 ms | **49 ms** ✅ |
+| Timeline (`/projects/:id/schedule`) | 1.12 s | 534 ms | 107 ms |
+| Workload (`/users/workload`) | 698 ms | 184 ms | 118 ms |
+| Data transferred over the run | 814 MB | **185 MB** | — |
+
+The timeline was the last unbounded read and now takes the ids of the bars on
+screen: an arrow needs two visible bars, so an edge with one end off-screen has
+nothing to connect. On the 2,000-edge fixture that is **512 KB → 245 bytes**.
+Its p95 above still covers two round trips, because the profile fetches the
+page and then the edges, which is what the timeline itself does.
+
+The critical path stays whole-project deliberately: the chain where a slip
+moves the end date runs through tasks that may be off-screen, so scoping it
+would compute a *different* answer rather than a smaller one. It is a list of
+ids, so it is small however large the graph.
 
 The last row is the one worth reading twice: the same ten users now get through
 **ten times as many requests**, and every endpoint is faster while doing it —
 including the three nobody touched. That is what removing a 10 MB response from
 the process does.
 
-**M3's literal threshold is still not met.** A board page in isolation is
-126 ms against a 100 ms target, and 483 ms under a mix of ten users
-continuously driving six endpoints with no pause. The gap went from roughly
-ninety times to under five, and what remains is dominated by the timeline
-(512 KB of dependencies in one response) and by a synthetic load heavier than
-a board page in use. Called unmet rather than rounded up, because the number
-is the number.
+**M3's literal threshold is still not met, and is recorded as unmet.** A board
+page in isolation is 126 ms against a 100 ms target, and 407 ms under a mix of
+ten users continuously driving six endpoints with no pause. The gap went from
+roughly ninety times to about four, every unbounded read is now bounded, and
+what remains is the cost of a synthetic load heavier than a board page in use
+rather than any one query. Closing the last four times would mean either
+trimming the per-task payload or accepting a lighter definition of "under
+load"; neither is worth doing to make a number go green.
 
 **The board was the whole finding, and it was not an indexing problem.** The
 main query is 130 ms; the response was **10.1 MB**, because the endpoint

@@ -6,7 +6,8 @@ import Attachments, { AttachmentList, CommentAttachmentPicker } from './Attachme
 import RecurrenceSection from './RecurrenceSection';
 import { Dialog, ConfirmDialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
-import { Field, Input, Textarea } from '../ui/Field';
+import { Field, Input } from '../ui/Field';
+import { RichText, RichTextView } from '../ui/RichText';
 import { Avatar, Badge } from '../ui/display';
 import { useToast } from '../ui/Toast';
 import { Check, ChevronDown } from '../ui/icons';
@@ -188,10 +189,11 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
 
           <Field label={t('task.description')}>
             {({ id }) => (
-              <Textarea
+              <RichText
                 id={id}
+                ariaLabel={t('task.description')}
                 value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                onChange={(description) => setForm((f) => ({ ...f, description }))}
               />
             )}
           </Field>
@@ -325,7 +327,12 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
             <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 var(--space-3)', display: 'grid', gap: 'var(--space-3)' }}>
               {current?.comments?.map((entry) => (
                 <li key={entry.id} style={{ fontSize: 'var(--text-sm)' }}>
-                  <strong>{entry.author?.name ?? '—'}:</strong> {entry.body}
+                  <strong>{entry.author?.name ?? '—'}:</strong>{' '}
+                  {/* Rendered through the editor's own schema rather than
+                      injected as HTML — see RichTextView. Comments written
+                      before this shipped are plain text, which is valid HTML
+                      and renders unchanged. */}
+                  <RichTextView html={entry.body} />
                   {/* Files said with the comment stay with the comment, rather
                       than pooling in the task's list where the sentence that
                       explains them is nowhere in sight. */}
@@ -338,12 +345,13 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
             </ul>
             <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
               <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <Input
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder={t('task.writeComment')}
-                  aria-label={t('task.writeComment')}
-                />
+                <div style={{ flex: 1 }}>
+                  <RichText
+                    value={comment}
+                    onChange={setComment}
+                    ariaLabel={t('task.writeComment')}
+                  />
+                </div>
                 <Button
                   type="button"
                   loading={addComment.isPending || uploadAttachment.isPending}

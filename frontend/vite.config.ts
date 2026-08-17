@@ -23,7 +23,10 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           charts: ['recharts'],
-          query: ['@tanstack/react-query']
+          query: ['@tanstack/react-query'],
+          // The editor is the heaviest thing on the page and is only reached
+          // from a task dialog, so it stays out of the initial download.
+          editor: ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-link']
         }
       }
     }

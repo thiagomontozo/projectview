@@ -43,9 +43,6 @@ export default function ProjectBoardPage() {
 
   const project = useProject(id);
   const { data: allUsers = [] } = useUsers();
-  // Only the timeline draws arrows, so the schedule is not fetched for the
-  // other views.
-  const schedule = useSchedule(view.state.kind === 'timeline' ? id : undefined);
   const moveTask = useMoveTask();
   const saveTask = useSaveTask();
 
@@ -69,6 +66,15 @@ export default function ProjectBoardPage() {
   // because a chart drawn from part of the data looks exactly like a chart
   // drawn from all of it.
   const partial = total > loaded;
+
+  // Only the timeline draws arrows, so the schedule is not fetched elsewhere -
+  // and it is scoped to the bars on screen, since an arrow needs two of them
+  // and an edge with one end off-screen has nothing to connect. Declared after
+  // `visible` because it depends on it.
+  const schedule = useSchedule(
+    view.state.kind === 'timeline' ? id : undefined,
+    view.state.kind === 'timeline' ? visible.map((task) => task.id) : undefined
+  );
 
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());

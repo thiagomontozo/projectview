@@ -64,6 +64,11 @@ var managed = []ManagedSetting{
 	// that silently does nothing until the next deploy is worse than not
 	// offering it. These two are read on every run, so they apply at once.
 	{Key: "ALERT_WARN_DAYS_BEFORE", Group: "alerts", Kind: KindNumber},
+	// Editable now that the schedulers can be rebuilt. Until they could, a
+	// field here would have accepted a value and done nothing until the next
+	// deploy, which is worse than no field at all.
+	{Key: "ALERT_CRON", Group: "alerts", Kind: KindText},
+	{Key: "RETENTION_CRON", Group: "retention", Kind: KindText},
 	{Key: "AUDIT_RETENTION_DAYS", Group: "retention", Kind: KindNumber},
 	{Key: "NOTIFICATION_RETENTION_DAYS", Group: "retention", Kind: KindNumber},
 }
@@ -134,6 +139,8 @@ func flatten(s runtimeSettings) map[string]string {
 		"OIDC_AUTO_PROVISION": strconv.FormatBool(s.OIDC.AutoProvision),
 
 		"ALERT_WARN_DAYS_BEFORE":      strconv.Itoa(s.Alerts.WarnDaysBefore),
+		"ALERT_CRON":                  s.Alerts.CronExpr,
+		"RETENTION_CRON":              s.Retention.CronExpr,
 		"AUDIT_RETENTION_DAYS":        strconv.Itoa(s.Retention.AuditDays),
 		"NOTIFICATION_RETENTION_DAYS": strconv.Itoa(s.Retention.NotificationDays),
 	}
@@ -197,6 +204,8 @@ func merge(baseline runtimeSettings, overrides map[string]string) runtimeSetting
 	boolean("OIDC_AUTO_PROVISION", &out.OIDC.AutoProvision)
 
 	number("ALERT_WARN_DAYS_BEFORE", &out.Alerts.WarnDaysBefore)
+	text("ALERT_CRON", &out.Alerts.CronExpr)
+	text("RETENTION_CRON", &out.Retention.CronExpr)
 	number("AUDIT_RETENTION_DAYS", &out.Retention.AuditDays)
 	number("NOTIFICATION_RETENTION_DAYS", &out.Retention.NotificationDays)
 

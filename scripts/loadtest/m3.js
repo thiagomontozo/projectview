@@ -157,7 +157,20 @@ export default function (data) {
   });
 
   group('schedule', () => {
-    const res = http.get(`${BASE}/api/projects/${PROJECT_ID}/schedule`, params);
+    // Scoped to the bars on screen in the paginated profile, which is what the
+    // timeline now sends: an arrow needs two visible bars, so edges with one
+    // end off-screen are weight and nothing else. The unbounded profile keeps
+    // asking for the whole graph, which is what it is there to measure.
+    let url = `${BASE}/api/projects/${PROJECT_ID}/schedule`;
+    if (PROFILE === 'paginated') {
+      const page = http.get(
+        `${BASE}/api/tasks?projectId=${PROJECT_ID}&topLevel=true&limit=${PAGE_SIZE}&sort=position`,
+        params
+      );
+      const ids = (page.json('items') || []).map((task) => task.id);
+      if (ids.length) url += '?' + ids.map((id) => `taskId=${id}`).join('&');
+    }
+    const res = http.get(url, params);
     schedule.add(res.timings.duration);
     check(res, { 'schedule 200': (r) => r.status === 200 });
   });

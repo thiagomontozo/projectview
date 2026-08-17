@@ -115,17 +115,31 @@ func (a *API) ProjectSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	dependencies, err := a.Dependencies.ForProject(ctx, projectID)
+	// The timeline sends the ids of the bars it is drawing, and gets back only
+	// the arrows between them. An edge with one end off-screen has nothing to
+	// connect, so shipping it is pure weight - measured at 512 KB and the
+	// slowest endpoint in the load test before this.
+	//
+	// No ids means the whole graph, which keeps every other caller working and
+	// is what an export wants.
+	visible := httpx.UUIDs(r.URL.Query()["taskId"])
+
+	dependencies, err := a.Dependencies.ForProject(ctx, projectID, visible)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Deliberately NOT scoped. The critical path is a property of the whole
+	// project - the chain where a slip moves the end date runs through tasks
+	// that may be off-screen - and its result is a list of ids, so it is small
+	// however large the graph is. Scoping it would compute a different answer
+	// rather than a smaller one.
 	criticalPath, err := a.Dependencies.CriticalPath(ctx, projectID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	blocked, err := a.Dependencies.Blocked(ctx, projectID)
+	blocked, err := a.Dependencies.Blocked(ctx, projectID, visible)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return

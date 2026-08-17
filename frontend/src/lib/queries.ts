@@ -507,10 +507,26 @@ export interface Schedule {
   blocked: BlockedTask[];
 }
 
-export function useSchedule(projectId: string | undefined) {
+/**
+ * The timeline's arrows, for the bars it is actually drawing.
+ *
+ * `taskIds` scopes the edges to those with both ends on screen — an arrow needs
+ * two bars, so an edge with one end off-screen has nothing to connect and is
+ * only weight on the wire. Measured on a 2,000-edge project the whole graph was
+ * 512 KB and the slowest endpoint in the load test; the visible slice is a few
+ * hundred bytes.
+ *
+ * The critical path is deliberately still whole-project: the chain where a slip
+ * moves the end date runs through tasks that may be off-screen, and scoping it
+ * would compute a different answer rather than a smaller one.
+ */
+export function useSchedule(projectId: string | undefined, taskIds?: string[]) {
+  // Sorted so the cache key does not change when the same set arrives in a
+  // different order, which would refetch on every render.
+  const scoped = [...(taskIds ?? [])].sort();
   return useQuery({
-    queryKey: keys.schedule(projectId ?? ''),
-    queryFn: () => get<Schedule>(`/projects/${projectId}/schedule`),
+    queryKey: [...keys.schedule(projectId ?? ''), scoped.join(',')],
+    queryFn: () => get<Schedule>(`/projects/${projectId}/schedule`, { taskId: scoped }),
     enabled: Boolean(projectId)
   });
 }

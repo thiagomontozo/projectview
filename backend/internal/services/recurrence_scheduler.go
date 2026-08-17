@@ -19,6 +19,8 @@ import (
 // already not doing one; the series moves to the next date genuinely ahead and
 // the unfinished instance stays open and overdue. That is the honest record.
 type RecurrenceScheduler struct {
+	Guard *SweepGuard
+
 	recurrences *repo.Recurrences
 	tasks       *repo.Tasks
 	factory     TaskFactory
@@ -47,7 +49,9 @@ func (s *RecurrenceScheduler) Start() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 		for {
-			s.Run(context.Background())
+			// Guarded so two replicas do not each spawn the next instance of
+			// the same series.
+			s.Guard.Do(context.Background(), "Recurrence", func(ctx context.Context) { s.Run(ctx) })
 			<-ticker.C
 		}
 	}()

@@ -23,6 +23,12 @@ import (
 // to do excludes rows that already exist. The previous version loaded every
 // task and compared arrays in Go.
 type AlertScheduler struct {
+	cron *cron.Cron
+
+	// Guard makes this run once across the installation. Set by main; nil
+	// keeps the single-process behaviour every test relies on.
+	Guard *SweepGuard
+
 	tasks    *repo.Tasks
 	cfg      *config.Config
 	notifier *Notifier
@@ -33,12 +39,38 @@ func NewAlertScheduler(tasks *repo.Tasks, cfg *config.Config, notifier *Notifier
 	return &AlertScheduler{tasks: tasks, cfg: cfg, notifier: notifier, engine: engine}
 }
 
+// Restart rebuilds the schedule from the current configuration.
+//
+// The cron expression is read when the cron is built, so a change saved from
+// the settings screen used to do nothing until the next deploy. Calling this
+// after a save is what turns that field from decoration into a setting.
+func (s *AlertScheduler) Restart() {
+	s.stop()
+	s.Start()
+}
+
+func (s *AlertScheduler) stop() {
+	if s.cron != nil {
+		// Stop() lets a sweep already running finish; it only stops new ones
+		// being scheduled. Cutting a half-sent batch of alerts off mid-flight
+		// would be worse than letting it complete under the old schedule.
+		s.cron.Stop()
+		s.cron = nil
+	}
+}
+
 func (s *AlertScheduler) Start() {
+	s.stop()
 	c := cron.New()
+	s.cron = c
 	_, err := c.AddFunc(s.cfg.Alerts().CronExpr, func() {
-		if err := s.RunDeadlineCheck(context.Background()); err != nil {
-			logger.Error("deadline alert sweep failed: %v", err)
-		}
+		// Guarded so two replicas do not each notify the same person about the
+		// same deadline.
+		s.Guard.Do(context.Background(), "Alerts", func(ctx context.Context) {
+			if err := s.RunDeadlineCheck(ctx); err != nil {
+				logger.Error("deadline alert sweep failed: %v", err)
+			}
+		})
 	})
 	if err != nil {
 		logger.Error("invalid ALERT_CRON expression %q: %v", s.cfg.Alerts().CronExpr, err)

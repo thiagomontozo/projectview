@@ -66,6 +66,13 @@ type API struct {
 	Mailer    *services.Mailer
 	// OIDC is nil unless single sign-on is configured.
 	OIDC *auth.OIDC
+	// Schedulers whose cron expression an administrator can change. Held so a
+	// settings save can rebuild them: the expression is read when the cron is
+	// built, so without this a saved value would do nothing until the next
+	// deploy - and a field that silently waits for a redeploy is worse than no
+	// field.
+	Alerts    interface{ Restart() }
+	Retention interface{ Restart() }
 	// Engine runs the automation rules. Set by main once the notifier exists,
 	// since the two depend on each other's construction order.
 	Engine *services.AutomationEngine
