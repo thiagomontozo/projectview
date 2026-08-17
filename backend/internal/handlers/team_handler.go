@@ -203,6 +203,11 @@ func (a *API) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 
 type memberRequest struct {
 	UserID string `json:"userId"`
+	// DirectoryUsername names somebody from Active Directory who may not have
+	// an account here yet. Supplying it provisions the account and then adds
+	// them, which is the whole point of searching the directory: being put on
+	// a team is often the reason somebody logs in for the first time.
+	DirectoryUsername string `json:"directoryUsername"`
 }
 
 // POST /api/teams/:id/members
@@ -218,11 +223,35 @@ func (a *API) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	userID, err := uuid.Parse(req.UserID)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "Invalid userId.")
+
+	var userID uuid.UUID
+	switch {
+	case req.DirectoryUsername != "":
+		// Creating an account is an administrative act even when it happens as
+		// a side effect of building a team, so it is gated like one rather than
+		// riding on the permission to manage this particular team.
+		if !canAdministerStructure(auth.CurrentUser(r)) {
+			httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+			return
+		}
+		person, err := a.provisionFromDirectory(r, req.DirectoryUsername)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		userID = person.ID
+	case req.UserID != "":
+		parsed, err := uuid.Parse(req.UserID)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid userId.")
+			return
+		}
+		userID = parsed
+	default:
+		httpx.Error(w, http.StatusBadRequest, "Name somebody to add: userId, or directoryUsername.")
 		return
 	}
+
 	if err := a.Teams.AddMember(r.Context(), id, userID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return

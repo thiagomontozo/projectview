@@ -555,7 +555,7 @@ person-weeks, the eight phases landed as **9 verified deliveries**.
 
 What the system is now, measured rather than asserted: **9 embedded migrations**
 applied on boot, **10 Go test packages**, **339 end-to-end assertions** against
-a real containerised stack, **37 frontend tests**, **22 browser tests** driving
+a real containerised stack, **37 frontend tests**, **23 browser tests** driving
 the built bundle through the proxy, and **5 CI jobs** gating every push.
 
 The honest remaining risk is no longer that **M3** is unmeasured — it has been

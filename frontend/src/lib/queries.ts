@@ -72,6 +72,7 @@ export const keys = {
   users: ['users'] as const,
   workload: ['users', 'workload'] as const,
   teams: ['teams'] as const,
+  directory: (q: string) => ['directory', q] as const,
   spaces: ['spaces'] as const,
   folders: (spaceId: string) => ['spaces', spaceId, 'folders'] as const,
   projects: ['projects'] as const,
@@ -1064,5 +1065,78 @@ export function useDeleteTemplate() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/templates/${id}`),
     onSuccess: () => client.invalidateQueries({ queryKey: ['templates'] })
+  });
+}
+
+/* --- Team membership and the directory ------------------------------------------
+ *
+ * Adding somebody to a team used to be impossible from the interface: the
+ * endpoints existed and nothing called them. Worse, an Active Directory user
+ * only entered the local table by signing in, so a colleague could not be put
+ * on a team until they had logged in themselves - the wrong way round, since
+ * being put on the team is often the reason to log in.
+ * ------------------------------------------------------------------------------ */
+
+export interface DirectoryResult {
+  username: string;
+  name: string;
+  email: string;
+  /** They already have an account here; picking them only allocates. */
+  known: boolean;
+  userId?: string;
+}
+
+export interface DirectoryResponse {
+  results: DirectoryResult[];
+  /**
+   * False when the directory could not be consulted at all — not enabled, or no
+   * service account. An empty list then means "we could not look", which the
+   * interface must not present as "this person does not exist".
+   */
+  searched: boolean;
+  reason?: string;
+}
+
+export const MIN_DIRECTORY_QUERY = 2;
+
+export function useDirectorySearch(query: string, enabled = true) {
+  const trimmed = query.trim();
+  return useQuery({
+    queryKey: keys.directory(trimmed),
+    queryFn: () => get<DirectoryResponse>('/directory/search', { q: trimmed }),
+    enabled: enabled && trimmed.length >= MIN_DIRECTORY_QUERY,
+    // The directory is somebody else's system; asking it again for the same
+    // three letters within a minute buys nothing.
+    staleTime: 60_000
+  });
+}
+
+/**
+ * Adds a member, by local id or by directory username.
+ *
+ * The second form provisions the account first, server-side. Both go through
+ * one endpoint so the interface does not have to decide which of the two it is
+ * doing before it knows whether the person already exists.
+ */
+export function useAddTeamMember() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ teamId, ...body }: { teamId: string; userId?: string; directoryUsername?: string }) =>
+      api.post<Team>(`/teams/${teamId}/members`, body).then((r) => r.data),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.teams });
+      // A provisioned account is a new user everywhere else, too.
+      client.invalidateQueries({ queryKey: keys.users });
+      client.invalidateQueries({ queryKey: ['directory'] });
+    }
+  });
+}
+
+export function useRemoveTeamMember() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ teamId, userId }: { teamId: string; userId: string }) =>
+      api.delete<Team>(`/teams/${teamId}/members/${userId}`).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.teams })
   });
 }

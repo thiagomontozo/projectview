@@ -173,7 +173,20 @@
     "members": "Membros",
     "empty": "Nenhuma equipe ainda",
     "emptyBody": "Crie uma equipe para agrupar as pessoas que trabalham juntas.",
-    "created": "Equipe criada."
+    "created": "Equipe criada.",
+    "manage": "Membros",
+    "manageMembers": "Membros de {{team}}",
+    "currentMembers": "Nesta equipe",
+    "noMembers": "Ninguém nesta equipe ainda.",
+    "addMember": "Adicionar alguém",
+    "searchPeople": "Buscar pessoas por nome, e-mail ou usuário...",
+    "keepTyping": "Continue digitando — pelo menos dois caracteres.",
+    "fromDirectory": "Do diretório",
+    "nobodyFound": "Ninguém encontrado.",
+    "directoryUnavailable": "Não foi possível consultar o Active Directory, então só aparecem pessoas que já têm conta. Configure o diretório e a conta de serviço em Administração → Configurações do sistema.",
+    "createLocallyHint": "Quem não está no diretório pode receber uma conta local em Administração → Usuários.",
+    "memberAdded": "{{name}} foi adicionado à equipe.",
+    "removeMember": "Remover {{name}} da equipe"
   },
   "spaces": {
     "title": "Espaços",

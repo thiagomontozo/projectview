@@ -18,6 +18,18 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
 - **Active Directory login** — authentication against LDAP/AD
   (`AD_ENABLED=true`), with a fallback to local accounts (username/password
   hashed with bcrypt) when AD is not configured.
+- **Directory search when staffing a team** — people are found in AD by name,
+  e-mail or username and put on a team **before they have ever signed in**,
+  which creates their account as first login would. Without it the only route
+  into the user table was just-in-time provisioning, so an administrator could
+  only allocate people who had already logged in — the wrong way round, since
+  being put on the team is often the reason to log in. Requires the service
+  account (`AD_BIND_DN` / `AD_BIND_PASSWORD`): searching a directory needs
+  credentials of its own. When it is not configured the interface says the
+  directory could not be consulted rather than showing an empty list, because
+  "nobody matched" and "nobody could be looked up" must not look the same.
+  Anyone outside the directory still gets a local account under
+  **Administration → Users**.
 - **Teams, projects, tasks and sub-tasks** — full CRUD. A sub-task is simply a
   task whose `parentTask` points at its parent, which allows nesting.
 - **Resource allocation** — anyone can be assigned to many tasks and projects
@@ -469,6 +481,8 @@ where the target document is available, and gated by role in
 | Capture or delete a template | `admin`, `manager` |
 | Apply a task template into a project | Project members, or `admin` |
 | Apply a project template (it creates a project) | `admin`, `manager` |
+| Search the directory for people | `admin`, `manager` |
+| Add somebody to a team from the directory (creates their account) | `admin`, `manager` |
 | Create accounts, assign roles, deactivate users | `admin` |
 | Reset someone else's password | `admin` |
 | Change your own password | You, **proving the current password** |

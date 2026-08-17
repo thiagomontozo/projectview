@@ -160,6 +160,11 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Delete("/{id}", api.RevokeServiceToken)
 	})
 
+	// Searching Active Directory for people who may have no account here yet.
+	// Role-gated inside the handler, where the answer can also explain why the
+	// search is unavailable rather than merely refusing it.
+	r.With(requireAuth).Get("/api/directory/search", api.SearchDirectory)
+
 	r.Route("/api/teams", func(r chi.Router) {
 		r.Use(requireAuth)
 		r.Get("/", api.ListTeams)

@@ -173,7 +173,20 @@
     "members": "Members",
     "empty": "No teams yet",
     "emptyBody": "Create a team to group the people who work together.",
-    "created": "Team created."
+    "created": "Team created.",
+    "manage": "Members",
+    "manageMembers": "Members of {{team}}",
+    "currentMembers": "On this team",
+    "noMembers": "Nobody is on this team yet.",
+    "addMember": "Add somebody",
+    "searchPeople": "Search people by name, e-mail or username...",
+    "keepTyping": "Keep typing — at least two characters.",
+    "fromDirectory": "From the directory",
+    "nobodyFound": "Nobody matched.",
+    "directoryUnavailable": "Active Directory could not be searched, so only people who already have an account are listed. Configure the directory and its service account under Administration → System settings.",
+    "createLocallyHint": "Somebody who is not in the directory can be given a local account under Administration → Users.",
+    "memberAdded": "{{name}} was added to the team.",
+    "removeMember": "Remove {{name}} from the team"
   },
   "spaces": {
     "title": "Spaces",

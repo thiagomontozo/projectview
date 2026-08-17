@@ -375,6 +375,44 @@ doing only if somebody asks by name.
 
 ---
 
+## Reported by a user
+
+### ✅ Teams could be created but never staffed — fixed
+
+**Found by somebody using the product, not by any test**, which is the part
+worth recording. `POST /api/teams/{id}/members` and its delete counterpart had
+existed since the first phase and worked correctly; nothing in the interface
+ever called them. Every API assertion passed the whole time, because the API
+was never the problem.
+
+Underneath it was a worse gap: an Active Directory user only entered the local
+table by signing in, so a colleague could not be allocated until they had
+logged in themselves — and being put on the team is often *why* somebody logs
+in. The fix adds a directory search (`GET /api/directory/search`) and lets a
+member be added by directory username, provisioning the account exactly as a
+first login would.
+
+Three decisions worth knowing:
+
+- **Searching needs a service account** (`AD_BIND_DN` / `AD_BIND_PASSWORD`).
+  There is no way around it: the only other credentials this application ever
+  sees belong to the person signing in, at the moment they sign in.
+- **"Nobody matched" and "nobody could be looked up" are different answers.**
+  The endpoint returns `searched: false` with a reason when the directory
+  cannot be consulted, and the interface says so rather than showing an empty
+  list that implies the person does not exist.
+- **The query is escaped before the wildcards are added**, in that order.
+  Escaping afterwards would neutralise our own asterisks; adding them first
+  would let a caller's asterisk through and turn a search box into an arbitrary
+  LDAP filter. Verified against a real directory: `*)(objectClass=*` returns
+  nothing rather than the staff list.
+
+Validated against a containerised OpenLDAP with seeded people, since the
+deployment this is for does not exist yet. **Enabling AD changed the login
+default and broke the browser suite** — the form defaults to the directory, and
+the bootstrap administrator is a local account. The suite now picks "local
+account" explicitly, so configuring AD no longer breaks every test.
+
 ## Smaller items
 
 - **Alert and retention cron expressions are not editable** from the settings

@@ -38,6 +38,15 @@ setup('the login screen renders, and signing in works', async ({ page }) => {
   // like a dotted key catches the whole class.
   await expectNoRawTranslationKeys(page);
 
+  // When Active Directory is configured the form offers a choice and defaults
+  // to the directory. The bootstrap administrator is a local account, so the
+  // suite says so explicitly rather than depending on how this particular
+  // installation is set up - otherwise enabling AD silently breaks every test.
+  const localTab = page.getByRole('tab', { name: /conta local|local account/i });
+  if (await localTab.count()) {
+    await localTab.click();
+  }
+
   await page.getByLabel(/usu[áa]rio|username/i).fill(USERNAME);
   await page.getByLabel(/senha|password/i).fill(PASSWORD);
   await page.getByRole('button', { name: /entrar|sign in/i }).click();

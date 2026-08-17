@@ -9,6 +9,8 @@ import { SkeletonList } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
 import { Plus, Users } from '../ui/icons';
 import { useCreateTeam, useTeams } from '../lib/queries';
+import TeamMembersDialog from '../components/TeamMembersDialog';
+import type { Team } from '../types';
 import { errorMessage } from '../lib/api';
 import styles from './pages.module.css';
 
@@ -19,6 +21,7 @@ export default function TeamsPage() {
   const createTeam = useCreateTeam();
 
   const [open, setOpen] = useState(false);
+  const [managing, setManaging] = useState<Team | null>(null);
   const [form, setForm] = useState({ name: '', description: '' });
   const [error, setError] = useState('');
 
@@ -81,10 +84,28 @@ export default function TeamsPage() {
                 <span className={styles.subtle}>
                   {t('projects.memberCount', { count: team.members?.length ?? 0 })}
                 </span>
+                {/* The endpoints to add and remove members existed from the
+                    start; nothing in the interface called them, so a team could
+                    be created and never staffed. */}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => setManaging(team)}
+                >
+                  {t('teams.manage')}
+                </Button>
               </div>
             </Card>
           ))}
         </ul>
+      )}
+
+      {managing && (
+        <TeamMembersDialog
+          team={teams?.find((candidate) => candidate.id === managing.id) ?? managing}
+          onClose={() => setManaging(null)}
+        />
       )}
 
       <Dialog
