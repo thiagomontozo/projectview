@@ -192,6 +192,8 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		// Everything the timeline needs to draw arrows and highlight the
 		// chain where a slip moves the end date.
 		r.Get("/{projectId}/schedule", api.ProjectSchedule)
+		r.Get("/{projectId}/intake", api.ListIntakeForms)
+		r.Post("/{projectId}/intake", api.CreateIntakeForm)
 		r.Get("/{projectId}/fields", api.ListCustomFields)
 		r.Post("/{projectId}/fields", api.CreateCustomField)
 		r.Get("/{projectId}/automations", api.ListAutomations)
@@ -259,6 +261,24 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 	// suggestion, and one nobody can see is one nobody uses - while capturing,
 	// applying a project template and deleting are gated in the handlers, where
 	// the target scope is known.
+	r.Route("/api/intake", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Patch("/{id}", api.SetIntakeFormEnabled)
+		r.Delete("/{id}", api.DeleteIntakeForm)
+		r.Get("/{id}/submissions", api.IntakeSubmissions)
+	})
+
+	// The public half of intake. Outside every authenticated group, so it
+	// cannot inherit a permission by being nested under one - that, not the
+	// URL prefix, is the safety property.
+	//
+	// It stays under /api because the edge proxy routes by prefix and anything
+	// else reaches the SPA instead; /public says plainly what it is, and leaves
+	// /intake/:slug free for the page that renders the form. A private form
+	// still answers 404 to anyone not signed in.
+	r.Get("/api/public/intake/{slug}", api.PublicIntakeForm)
+	r.Post("/api/public/intake/{slug}", api.SubmitIntakeForm)
+
 	r.Route("/api/templates", func(r chi.Router) {
 		r.Use(requireAuth)
 		r.Get("/", api.ListTemplates)
@@ -290,6 +310,11 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Get("/messages/{id}/replies", api.MessageThread)
 		r.Post("/messages/{id}/replies", api.ReplyToMessage)
 		r.Post("/messages/{id}/reactions", api.ToggleReaction)
+		// Editing is the author's own, and stamped. Attachments hang off the
+		// message and are gated by membership of the channel rather than of a
+		// project - a different resolution, which is why it took its own path.
+		r.Put("/messages/{id}", api.EditMessage)
+		r.Post("/messages/{id}/attachments", api.UploadMessageAttachment)
 	})
 
 	r.Route("/api/docs", func(r chi.Router) {

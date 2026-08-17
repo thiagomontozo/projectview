@@ -480,6 +480,45 @@ check "an unknown kind is refused" "400" "$(status_of -H "$AUTH" "$BASE/api/temp
 contains "capturing is audited" "$("${CURL[@]}" -H "$AUTH" "$BASE/api/audit?action=template.created")" "template.created"
 
 # ---------------------------------------------------------------------------
+section "Intake forms"
+intake="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/intake" -H "$AUTH"     -H 'Content-Type: application/json'     -d '{"title":"Report a problem","public":true,"fields":[{"key":"what","label":"What happened","type":"text","required":true}]}')"
+intake_id="$(json_str "$intake" id)"
+intake_slug="$(json_str "$intake" slug)"
+if [ -n "$intake_slug" ]; then
+    pass "a form is created with an unguessable address"
+else
+    fail "a form is created with an unguessable address" "$intake"
+fi
+
+# The public half answers the questions and nothing else: not the project, not
+# its members, not the other forms on it.
+public_form="$("${CURL[@]}" "$BASE/api/public/intake/$intake_slug")"
+contains "an anonymous visitor can read a public form" "$public_form" '"fields"'
+if printf '%s' "$public_form" | grep -q 'projectId'; then
+    fail "the public form leaks nothing else" "$public_form"
+else
+    pass "the public form leaks nothing else"
+fi
+
+contains "an anonymous submission is accepted"     "$("${CURL[@]}" -X POST "$BASE/api/public/intake/$intake_slug" -H 'Content-Type: application/json'         -d '{"answers":{"what":"The export button does nothing"}}')" '"received":true'
+# Required fields are enforced on the server, since the endpoint is reachable
+# by anything that can make a request.
+check "a missing required answer is refused" "400"     "$(status_of -X POST "$BASE/api/public/intake/$intake_slug" -H 'Content-Type: application/json' -d '{"answers":{}}')"
+
+contains "the submission became a task"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&q=export%20button")" "export button"
+contains "and the verbatim answers are kept"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/intake/$intake_id/submissions")" '"answers"'
+
+check "closing a form closes it" "200"     "$(status_of -X PATCH "$BASE/api/intake/$intake_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"enabled":false}')"
+# A closed form and an unknown one answer identically, so closing does not
+# confirm it ever existed.
+check "a closed form is not reachable" "404" "$(status_of "$BASE/api/public/intake/$intake_slug")"
+
+# ---------------------------------------------------------------------------
+section "Date-windowed listings"
+check "a malformed window is refused" "400"     "$(status_of -H "$AUTH" "$BASE/api/tasks?dueFrom=yesterday")"
+contains "a window still reports a total"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&limit=1&total=true&dueFrom=2020-01-01T00:00:00Z&dueTo=2030-01-01T00:00:00Z")" '"total"'
+
+# ---------------------------------------------------------------------------
 section "Dashboard charts"
 for endpoint in overview status-breakdown workload-chart project-progress completion-trend; do
     check "dashboard/$endpoint" "200" "$(status_of -H "$AUTH" "$BASE/api/dashboard/$endpoint")"
@@ -557,6 +596,32 @@ fi
 check "an unknown message cannot be replied to" "404" \
     "$(status_of -X POST "$BASE/api/chat/messages/00000000-0000-0000-0000-000000000000/replies" \
         -H "$AUTH" -H 'Content-Type: application/json' -d '{"body":"x"}')"
+
+# ---------------------------------------------------------------------------
+section "Chat files and edits"
+chat_msg="$("${CURL[@]}" -X POST "$BASE/api/chat/channels/$channel_id/messages" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"body":"first version"}')"
+chat_msg_id="$(json_str "$chat_msg" id)"
+
+edited="$("${CURL[@]}" -X PUT "$BASE/api/chat/messages/$chat_msg_id" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"body":"corrected version"}')"
+contains "a message can be edited"     "$edited" '"body":"corrected version"'
+# The stamp is the point: a message that changes with no sign it changed stops
+# the conversation being a record.
+contains "and the edit is stamped"     "$edited" '"editedAt":'
+check "an empty edit is refused" "400"     "$(status_of -X PUT "$BASE/api/chat/messages/$chat_msg_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"body":"   "}')"
+
+if printf '%s' "$attach_config" | grep -q '"enabled":true'; then
+    printf 'chat file' >"${TMPDIR:-/tmp}/pv-chat-$RUN_ID.txt"
+    chat_file="$("${CURL[@]}" -X POST "$BASE/api/chat/messages/$chat_msg_id/attachments" -H "$AUTH"         -F "file=@${TMPDIR:-/tmp}/pv-chat-$RUN_ID.txt")"
+    contains "a file can be attached to a message" "$chat_file" "\"messageId\":\"$chat_msg_id\""
+    # One owner, enforced by a CHECK: a row belonging to both a task and a
+    # message would leave the two permission paths disagreeing about who reads it.
+    if printf '%s' "$chat_file" | grep -q '"taskId"'; then
+        fail "a chat file has no task owner" "$chat_file"
+    else
+        pass "a chat file has no task owner"
+    fi
+    rm -f "${TMPDIR:-/tmp}/pv-chat-$RUN_ID.txt"
+fi
 
 # ---------------------------------------------------------------------------
 section "Presence"

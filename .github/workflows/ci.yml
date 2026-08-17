@@ -193,6 +193,7 @@ jobs:
                    app_settings \
                    attachments attachment_deletions \
                    task_recurrences templates \
+                   intake_forms intake_submissions \
                    schema_migrations; do
             grep -qx "$t" /tmp/tables || { echo "missing table: $t" >&2; exit 1; }
           done
@@ -212,6 +213,13 @@ jobs:
           # insert with a window between them.
           psql "SELECT indexname FROM pg_indexes WHERE indexname = 'task_recurrences_pkey'" | grep -q . \
             || { echo "a recurrence could belong to two tasks" >&2; exit 1; }
+
+          # An attachment belongs to a task or to a chat message, never both.
+          # The two resolve authorization differently - through a project, or
+          # through channel membership - so a row with two owners would leave
+          # the paths disagreeing about who may read it.
+          psql "SELECT conname FROM pg_constraint WHERE conname = 'attachments_one_owner'" | grep -q . \
+            || { echo "an attachment could belong to two owners" >&2; exit 1; }
 
           # One running timer per person is a database invariant.
           psql "SELECT indexname FROM pg_indexes WHERE indexname = 'time_entries_single_running_idx'" | grep -q . \
@@ -234,7 +242,8 @@ jobs:
           for v in 0001_init 0002_sessions_and_audit 0003_search_and_hierarchy \
                    0004_product_engine 0005_collaboration 0006_enterprise \
                    0007_app_settings 0008_attachments \
-                   0009_recurrence_and_templates; do
+                   0009_recurrence_and_templates \
+                   0010_chat_files_and_intake; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done

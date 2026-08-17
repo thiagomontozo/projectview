@@ -428,11 +428,16 @@ account" explicitly, so configuring AD no longer breaks every test.
   against the current configuration, so the field changes the timetable instead
   of waiting for the next deploy. `Stop()` lets a sweep already running finish
   rather than cutting a half-sent batch of alerts off mid-flight.
-- **Chat has no attachments and no editing**, though the schema has an
-  `edited_at` column waiting for it. Tasks have attachments now (3.1) and the
-  object storage is in place, so the remaining work is the permission side:
-  a chat file is gated by channel membership rather than by project membership,
-  which is a different resolution path rather than a wider query.
+- ✅ **Chat has attachments and editing.** The permission side was the work, as
+  predicted: a task file resolves through its project, a chat file through
+  membership of the channel, so it is a branch rather than a wider query. A
+  database CHECK enforces exactly one owner - a row belonging to both would
+  leave the two paths disagreeing about who may read it.
+
+  Editing is the author's own and **stamped**: a message that changes with no
+  sign it changed stops the conversation being a record. Not even an
+  administrator may rewrite somebody else's words - that is a different power
+  from moderating, and this application has no moderation model to hang it on.
 - ✅ **Rich text on descriptions and comments.** It became a complaint, which
   was the stated trigger. TipTap over ProseMirror, MIT. **Documents keep
   Markdown** — the original reasoning still holds there: it stays greppable,
@@ -457,7 +462,23 @@ account" explicitly, so configuring AD no longer breaks every test.
   at all, which makes it all-rights-reserved by default and not something to put
   in a corporate deployment. It also pulls Solid into a React bundle and is
   pre-1.0.
-- **Intake forms** — the last unbuilt item from the collaboration phase.
+- ✅ **Intake forms.** A form somebody fills in to raise work without
+  understanding the board it lands on. Submissions become **ordinary tasks**:
+  an intake queue that is its own kind of record is a second inbox nobody
+  watches.
+
+  The public half lives outside every authenticated route group so it cannot
+  inherit a permission by being nested under one, and it answers the questions
+  and nothing else - not the project, not its members. Anonymous access is off
+  by default; the address is 128 bits from `crypto/rand` rather than a
+  name-derived slug, because a public form is reachable by anyone who learns it
+  and "acme-bug-report" would be guessable in an afternoon. Required fields are
+  enforced server-side, answers to questions the form does not ask are dropped,
+  and a closed form answers 404 exactly like an unknown one.
+
+  The verbatim answers are kept beside the task, because the task gets retitled
+  and rewritten afterwards and the record of what somebody actually asked for
+  should not change with it.
 - ✅ **Frontend coverage is measured in CI**, alongside the backend's. A number
   existed for half the codebase and the other half was unmeasured.
 
@@ -482,20 +503,19 @@ the load demands it today, but because both blockers are small, both are known,
 and neither gets easier later. The attachment sweeper added in 3.1 is already
 replica-safe; the WebSocket hub and the schedulers are not.
 
-**What is actually left, and nothing here blocks use:**
+**What is actually left:**
 
-- **The WebSocket hub is per-process** — the last blocker to a second replica,
-  and the only item with a standing case for doing it before somebody asks.
-- **Chat has no attachments and no editing.** The object storage is in place;
-  the work is the permission side, which is channel membership rather than
-  project membership.
-- **Intake forms** — the last unbuilt item from the collaboration phase.
-- **Grouping by assignee or priority in the list view, and the calendar,
-  timeline and workload views, still draw from one loaded page.** Each says so
-  on screen; paging them by group is contained now that the server can count.
-- **Attachments have no browser coverage** on the drag-and-drop target or the
-  upload progress bar. A file input that silently did nothing would still pass
-  everything.
+- **The WebSocket hub is per-process** — now the *only* blocker to a second
+  replica, since the four scheduled sweeps hold advisory locks. It is the one
+  item with a standing case for doing before somebody asks.
+- **Grouping by assignee or priority in the list view still buckets one loaded
+  page.** The calendar and timeline no longer do: both ask for the date window
+  they draw, which is complete for the period on screen. The list's grouping is
+  the remaining case, and it says so.
 - **M3 remains unmet at 407 ms against 100 ms.** Every unbounded read is now
   bounded; what is left is the cost of a synthetic load heavier than a board
-  page in real use.
+  page in real use, not any one query.
+
+Everything else at Priority 4 is a deliberate deferral with a reason — SAML
+until a provider needs it, XLSX and PDF until named, point-in-time recovery
+when the operational commitment is wanted, webhooks as a phase of their own.

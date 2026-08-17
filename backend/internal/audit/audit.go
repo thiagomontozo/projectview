@@ -59,6 +59,11 @@ const (
 
 	// Templates shape how work gets created, so capturing and applying one is
 	// recorded like the structure it produces.
+	ActionIntakeFormCreated = "intake.form_created"
+	// Recorded anonymously when it has to be: a public form is submitted by
+	// somebody with no account, and the trail still needs the event.
+	ActionIntakeSubmitted = "intake.submitted"
+
 	ActionTemplateCreated = "template.created"
 	ActionTemplateApplied = "template.applied"
 

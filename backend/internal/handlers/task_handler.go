@@ -232,6 +232,25 @@ func (a *API) parseTaskQuery(w http.ResponseWriter, r *http.Request) (repo.TaskQ
 		query.AssigneeIDs = append(query.AssigneeIDs, id)
 	}
 
+	// The date window a calendar or a timeline is showing. Without it those
+	// views drew from whatever page happened to be loaded, which is a chart of
+	// part of the data that looks exactly like a chart of all of it.
+	for param, target := range map[string]**time.Time{
+		"dueFrom": &query.DueFrom,
+		"dueTo":   &query.DueTo,
+	} {
+		raw := q.Get(param)
+		if raw == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "Invalid "+param+": expected an RFC 3339 timestamp.")
+			return query, false
+		}
+		*target = &parsed
+	}
+
 	if raw := q.Get("offset"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 0 {

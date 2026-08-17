@@ -82,6 +82,32 @@ func (r *Chat) MessageByID(ctx context.Context, id uuid.UUID) (*models.ChatMessa
 	return &m, nil
 }
 
+// EditMessage rewrites a message body and stamps when it changed.
+//
+// edited_at is set rather than merely updated_at, because the two say different
+// things: updated_at moves for any write, while edited_at is the thing the
+// interface shows. A message that changes with no sign it changed stops the
+// conversation being a record people can rely on.
+func (r *Chat) EditMessage(ctx context.Context, id uuid.UUID, body string) (*models.ChatMessage, error) {
+	var m models.ChatMessage
+	err := r.store.Pool.QueryRow(ctx, `
+		UPDATE chat_messages
+		   SET body = $2, edited_at = now(), updated_at = now()
+		 WHERE id = $1
+		RETURNING id, channel_id, author_id, body, parent_id, edited_at, created_at, updated_at`,
+		id, body).
+		Scan(&m.ID, &m.ChannelID, &m.Author, &m.Body, &m.ParentID,
+			&m.EditedAt, &m.CreatedAt, &m.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	m.ReadBy = []uuid.UUID{}
+	return &m, nil
+}
+
 // Thread returns the replies to a message, oldest first.
 func (r *Chat) Thread(ctx context.Context, parentID uuid.UUID) ([]models.ChatMessage, error) {
 	rows, err := r.store.Pool.Query(ctx, `

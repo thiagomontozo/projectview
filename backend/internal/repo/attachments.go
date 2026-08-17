@@ -28,8 +28,13 @@ const (
 )
 
 type Attachment struct {
-	ID          uuid.UUID  `json:"id"`
-	TaskID      uuid.UUID  `json:"taskId"`
+	ID uuid.UUID `json:"id"`
+	// Exactly one of TaskID and MessageID is set, enforced by a CHECK. The two
+	// resolve authorization differently - a task file through its project, a
+	// chat file through membership of the channel - so a row belonging to both
+	// would leave the two paths disagreeing about who may read it.
+	TaskID      *uuid.UUID `json:"taskId,omitempty"`
+	MessageID   *uuid.UUID `json:"messageId,omitempty"`
 	CommentID   *uuid.UUID `json:"commentId,omitempty"`
 	Filename    string     `json:"filename"`
 	ContentType string     `json:"contentType"`
@@ -46,12 +51,12 @@ type Attachment struct {
 }
 
 const attachmentColumns = `
-	id, task_id, comment_id, filename, content_type, size_bytes,
+	id, task_id, message_id, comment_id, filename, content_type, size_bytes,
 	storage_key, checksum, scan_status, scanned_at, uploaded_by, created_at`
 
 func scanAttachment(row pgx.Row) (*Attachment, error) {
 	var a Attachment
-	err := row.Scan(&a.ID, &a.TaskID, &a.CommentID, &a.Filename, &a.ContentType,
+	err := row.Scan(&a.ID, &a.TaskID, &a.MessageID, &a.CommentID, &a.Filename, &a.ContentType,
 		&a.SizeBytes, &a.StorageKey, &a.Checksum, &a.ScanStatus, &a.ScannedAt,
 		&a.UploadedBy, &a.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -76,11 +81,11 @@ func (r *Attachments) Create(ctx context.Context, a *Attachment) error {
 	}
 	return r.store.Pool.QueryRow(ctx, `
 		INSERT INTO attachments
-		    (id, task_id, comment_id, filename, content_type, size_bytes,
+		    (id, task_id, message_id, comment_id, filename, content_type, size_bytes,
 		     storage_key, checksum, scan_status, scanned_at, uploaded_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		RETURNING created_at`,
-		a.ID, a.TaskID, a.CommentID, a.Filename, a.ContentType, a.SizeBytes,
+		a.ID, a.TaskID, a.MessageID, a.CommentID, a.Filename, a.ContentType, a.SizeBytes,
 		a.StorageKey, a.Checksum, a.ScanStatus, a.ScannedAt, a.UploadedBy).
 		Scan(&a.CreatedAt)
 }
@@ -124,6 +129,50 @@ func (r *Attachments) Delete(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ForMessage lists the files on a chat message.
+func (r *Attachments) ForMessage(ctx context.Context, messageID uuid.UUID) ([]Attachment, error) {
+	rows, err := r.store.Pool.Query(ctx,
+		`SELECT `+attachmentColumns+` FROM attachments WHERE message_id = $1 ORDER BY created_at`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Attachment{}
+	for rows.Next() {
+		a, err := scanAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *a)
+	}
+	return out, rows.Err()
+}
+
+// ForMessages resolves the files for a batch of messages in one query, so a
+// channel transcript does not cost a query per message.
+func (r *Attachments) ForMessages(ctx context.Context, messageIDs []uuid.UUID) (map[uuid.UUID][]Attachment, error) {
+	out := map[uuid.UUID][]Attachment{}
+	if len(messageIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.store.Pool.Query(ctx,
+		`SELECT `+attachmentColumns+` FROM attachments WHERE message_id = ANY($1) ORDER BY created_at`, messageIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		a, err := scanAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[*a.MessageID] = append(out[*a.MessageID], *a)
+	}
+	return out, rows.Err()
 }
 
 // UsageBytes totals what one task already holds, so a per-task ceiling can be

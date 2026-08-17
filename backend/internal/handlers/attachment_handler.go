@@ -185,7 +185,7 @@ func (a *API) UploadAttachment(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256(content)
 	attachment := &repo.Attachment{
 		ID:          uuid.New(),
-		TaskID:      taskID,
+		TaskID:      &taskID,
 		CommentID:   commentID,
 		Filename:    filename,
 		ContentType: contentType,
@@ -319,20 +319,35 @@ func (a *API) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := a.Tasks.ByID(ctx, attachment.TaskID)
-	if err != nil {
-		respondRepoError(w, err, "Attachment not found.")
-		return
-	}
-
 	requester := auth.CurrentUser(r)
 	uploadedByCaller := attachment.UploadedBy != nil && *attachment.UploadedBy == requester.ID
-	if !uploadedByCaller {
-		if _, ok := a.requireProjectManage(w, r, task.ProjectID); !ok {
+
+	// A chat file resolves through membership of its channel, a task file
+	// through its project. Two different questions, which is why this is a
+	// branch rather than one widened check.
+	if attachment.MessageID != nil {
+		if _, _, ok := a.requireMessageAccess(w, r, *attachment.MessageID); !ok {
 			return
 		}
-	} else if _, _, ok := a.requireTaskWork(w, r, attachment.TaskID); !ok {
-		return
+		// In a conversation the author is the only one who may withdraw what
+		// they said; there is no "manage the channel" role to fall back on.
+		if !uploadedByCaller && !isAdmin(requester) {
+			httpx.Error(w, http.StatusForbidden, forbiddenMessage)
+			return
+		}
+	} else {
+		task, err := a.Tasks.ByID(ctx, *attachment.TaskID)
+		if err != nil {
+			respondRepoError(w, err, "Attachment not found.")
+			return
+		}
+		if !uploadedByCaller {
+			if _, ok := a.requireProjectManage(w, r, task.ProjectID); !ok {
+				return
+			}
+		} else if _, _, ok := a.requireTaskWork(w, r, *attachment.TaskID); !ok {
+			return
+		}
 	}
 
 	// Removes the row only. The trigger queues the object and the sweeper
@@ -346,10 +361,8 @@ func (a *API) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	a.Audit.Record(r, requester, audit.Event{
 		Action: audit.ActionAttachmentDeleted, ResourceType: "attachment",
 		ResourceID: id.String(),
-		Changes: map[string]any{
-			"filename": attachment.Filename, "task": attachment.TaskID.String(),
-		},
-		Status: http.StatusOK,
+		Changes:    map[string]any{"filename": attachment.Filename},
+		Status:     http.StatusOK,
 	})
 
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -389,6 +402,16 @@ func (a *API) requireAttachmentRead(w http.ResponseWriter, r *http.Request) (*re
 	if err != nil {
 		respondRepoError(w, err, "Attachment not found.")
 		return nil, false
+	}
+
+	// A task attachment is as readable as its task, which any authenticated
+	// user may read. A chat one is not: the conversation is private, so the
+	// same check the transcript uses applies here - and it answers 404 rather
+	// than 403, so the error does not confirm the file exists.
+	if attachment.MessageID != nil {
+		if _, _, ok := a.requireMessageAccess(w, r, *attachment.MessageID); !ok {
+			return nil, false
+		}
 	}
 	return attachment, true
 }

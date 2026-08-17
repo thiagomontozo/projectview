@@ -54,11 +54,25 @@ export default function ProjectBoardPage() {
   // Every view except the board reads one paged stream rather than a page per
   // column. The board does not use this - its columns fetch their own - so it
   // is disabled there instead of being fetched and thrown away.
+  // The calendar and the timeline are date-shaped, so they ask for the span
+  // they draw rather than a page of whatever sorted first. A year around today
+  // covers what either shows, and turns "100 of 3,412" into an answer that is
+  // actually complete for the period on screen.
+  const dateWindow = useMemo(() => {
+    if (view.state.kind !== 'calendar' && view.state.kind !== 'timeline') return {};
+    const from = new Date();
+    from.setMonth(from.getMonth() - 6);
+    const to = new Date();
+    to.setMonth(to.getMonth() + 6);
+    return { dueFrom: from.toISOString(), dueTo: to.toISOString() };
+  }, [view.state.kind]);
+
   const flat = useProjectTaskPage(id, {
     filters: view.state.filters,
     sortBy: view.state.sortBy,
     sortDirection: view.state.sortDirection,
-    enabled: view.state.kind !== 'board'
+    enabled: view.state.kind !== 'board',
+    ...dateWindow
   });
   const { tasks: visible, total, loaded } = pagedTasks(flat.data);
   // True when what is on screen is a subset of what matches. Every view that

@@ -185,6 +185,19 @@ type TaskQuery struct {
 	Overdue     bool
 	Search      string
 
+	// DueFrom and DueTo bound the window a date-shaped view is showing.
+	//
+	// The calendar draws a month and the timeline a span, so neither ever
+	// needed the whole project - they needed the dates on screen. Without this
+	// they drew from whatever page happened to be loaded, which is a chart of
+	// part of the data that looks exactly like a chart of all of it.
+	//
+	// A task with no dates is outside every window by definition and is
+	// excluded when either bound is set, which is what those views already do
+	// when they lay it out.
+	DueFrom *time.Time
+	DueTo   *time.Time
+
 	// SortColumn is a SQL expression, never a caller-supplied string: it comes
 	// from the allow-list in SortableTaskColumns, so the ORDER BY clause cannot
 	// be steered from the query string.
@@ -259,13 +272,13 @@ func (r *Tasks) Search(ctx context.Context, q TaskQuery) ([]models.Task, error) 
 		SELECT `+taskColumns+`
 		  FROM tasks t
 		 WHERE `+taskFilterSQL+`
-		   AND ($8::timestamptz IS NULL
-		        OR t.created_at < $8
-		        OR (t.created_at = $8 AND t.id < $9::uuid))
+		   AND ($10::timestamptz IS NULL
+		        OR t.created_at < $10
+		        OR (t.created_at = $10 AND t.id < $11::uuid))
 		 ORDER BY `+order+`
 		 `+paging,
 		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities, q.ParentOnly, q.Overdue,
-		q.Search, q.CursorTime, q.CursorID)
+		q.Search, q.DueFrom, q.DueTo, q.CursorTime, q.CursorID)
 }
 
 // taskOrderBy builds the ORDER BY clause.
@@ -315,7 +328,11 @@ const taskFilterSQL = `
 		   AND (COALESCE(cardinality($4::text[]), 0) = 0 OR t.priority = ANY($4))
 		   AND (NOT $5::boolean OR t.parent_task_id IS NULL)
 		   AND (NOT $6::boolean OR (t.due_date < now() AND t.status <> 'done'))
-		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))`
+		   AND ($7::text = '' OR t.search @@ websearch_to_tsquery('simple', $7))
+		   AND ($8::timestamptz IS NULL
+		        OR COALESCE(t.due_date, t.start_date) >= $8)
+		   AND ($9::timestamptz IS NULL
+		        OR COALESCE(t.start_date, t.due_date) <= $9)`
 
 // CountMatching reports how many tasks match, ignoring pagination.
 //
@@ -327,7 +344,7 @@ func (r *Tasks) CountMatching(ctx context.Context, q TaskQuery) (int64, error) {
 	err := r.store.Pool.QueryRow(ctx, `
 		SELECT count(*) FROM tasks t WHERE `+taskFilterSQL,
 		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities,
-		q.ParentOnly, q.Overdue, q.Search).Scan(&n)
+		q.ParentOnly, q.Overdue, q.Search, q.DueFrom, q.DueTo).Scan(&n)
 	return n, err
 }
 
@@ -341,7 +358,7 @@ func (r *Tasks) CountByStatus(ctx context.Context, q TaskQuery) (map[string]int6
 		SELECT t.status, count(*) FROM tasks t WHERE `+taskFilterSQL+`
 		 GROUP BY t.status`,
 		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities,
-		q.ParentOnly, q.Overdue, q.Search)
+		q.ParentOnly, q.Overdue, q.Search, q.DueFrom, q.DueTo)
 	if err != nil {
 		return nil, err
 	}

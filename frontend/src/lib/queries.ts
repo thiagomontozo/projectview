@@ -247,9 +247,12 @@ export function taskQueryParams(
     status?: string;
     limit?: number;
     offset?: number;
+    /** The window a date-shaped view is showing. */
+    dueFrom?: string;
+    dueTo?: string;
   }
 ): Record<string, unknown> {
-  const { filters = {}, sortBy, sortDirection, status, limit, offset } = options;
+  const { filters = {}, sortBy, sortDirection, status, limit, offset, dueFrom, dueTo } = options;
 
   return {
     projectId,
@@ -267,6 +270,11 @@ export function taskQueryParams(
     sort: sortBy ? `${sortDirection === 'desc' ? '-' : ''}${sortBy}` : undefined,
     limit: limit ?? TASK_PAGE_SIZE,
     offset: offset || undefined,
+    // The calendar and the timeline ask for the span they draw rather than a
+    // page of whatever sorted first: a chart of part of the data looks exactly
+    // like a chart of all of it.
+    dueFrom,
+    dueTo,
     total: 'true'
   };
 }
@@ -286,6 +294,8 @@ export interface TaskPageOptions {
   /** Restricts to one board column. */
   status?: string;
   enabled?: boolean;
+  dueFrom?: string;
+  dueTo?: string;
 }
 
 /**
@@ -303,9 +313,16 @@ export interface TaskPageOptions {
  * for scrolling a whole table.
  */
 export function useProjectTaskPage(projectId: string | undefined, options: TaskPageOptions) {
-  const { filters, sortBy, sortDirection, status, enabled = true } = options;
+  const { filters, sortBy, sortDirection, status, enabled = true, dueFrom, dueTo } = options;
 
-  const params = taskQueryParams(projectId ?? '', { filters, sortBy, sortDirection, status });
+  const params = taskQueryParams(projectId ?? '', {
+    filters,
+    sortBy,
+    sortDirection,
+    status,
+    dueFrom,
+    dueTo
+  });
 
   return useInfiniteQuery({
     queryKey: [...keys.projectTaskPage(projectId ?? '', status ?? 'all'), params],
