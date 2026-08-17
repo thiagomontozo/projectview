@@ -248,6 +248,17 @@ counts="$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/tasks/counts")
 contains "counts are reported per column" "$counts" '"byStatus"'
 contains "counts carry a total"           "$counts" '"total"'
 
+# The list groups by assignee and priority too, and its headers need a real
+# total for the same reason the board's columns do: counting loaded rows made a
+# header read "Ana 30" when Ana had 800, and hid anyone whose work was off this
+# page entirely - which reads as "nothing assigned" rather than "not loaded".
+contains "counts group by priority" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/tasks/counts?groupBy=priority")" '"byGroup"'
+contains "counts group by assignee" \
+    "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/tasks/counts?groupBy=assignee")" '"byGroup"'
+check "an unknown grouping is refused" "400" \
+    "$(status_of -H "$AUTH" "$BASE/api/projects/$project_id/tasks/counts?groupBy=colour")"
+
 paged="$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&limit=1&total=true")"
 contains "a page reports the total behind it" "$paged" '"total"'
 

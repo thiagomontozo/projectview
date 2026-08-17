@@ -180,17 +180,32 @@ func (a *API) TaskCounts(w http.ResponseWriter, r *http.Request) {
 	// filtered.
 	query.Statuses = nil
 
-	counts, err := a.Tasks.CountByStatus(r.Context(), query)
+	// The list groups by assignee or priority as well as by status, and its
+	// headers need a real total for the same reason the board's columns do.
+	groupBy := r.URL.Query().Get("groupBy")
+	switch groupBy {
+	case "", "status", "assignee", "priority":
+	default:
+		httpx.Error(w, http.StatusBadRequest, "groupBy must be status, assignee or priority.")
+		return
+	}
+
+	counts, err := a.Tasks.CountByGroup(r.Context(), query, groupBy)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	total := int64(0)
-	for _, n := range counts {
-		total += n
+	// Summing an assignee grouping would double-count a shared task, since it
+	// appears under each of its assignees. The honest total is the row count.
+	total, err := a.Tasks.CountMatching(r.Context(), query)
+	if err != nil {
+		total = 0
+		for _, n := range counts {
+			total += n
+		}
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"byStatus": counts, "total": total})
+	httpx.JSON(w, http.StatusOK, map[string]any{"byStatus": counts, "byGroup": counts, "total": total})
 }
 
 // parseTaskQuery reads the listing query string into a repo query.

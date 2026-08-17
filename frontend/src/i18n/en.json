@@ -360,7 +360,8 @@
     "loadOver": "Over {{capacity}}h/week",
     "criticalPath": "Critical path",
     "showingOf": "Showing {{loaded}} of {{total}} tasks.",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "groupCountOf": "{{loaded}} of {{total}}"
   },
   "docs": {
     "title": "Docs",

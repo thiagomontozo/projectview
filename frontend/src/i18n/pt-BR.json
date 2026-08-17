@@ -360,7 +360,8 @@
     "loadOver": "Acima de {{capacity}}h/semana",
     "criticalPath": "Caminho crítico",
     "showingOf": "Mostrando {{loaded}} de {{total}} tarefas.",
-    "loadMore": "Carregar mais"
+    "loadMore": "Carregar mais",
+    "groupCountOf": "{{loaded}} de {{total}}"
   },
   "docs": {
     "title": "Documentos",

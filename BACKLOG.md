@@ -508,10 +508,21 @@ replica-safe; the WebSocket hub and the schedulers are not.
 - **The WebSocket hub is per-process** — now the *only* blocker to a second
   replica, since the four scheduled sweeps hold advisory locks. It is the one
   item with a standing case for doing before somebody asks.
-- **Grouping by assignee or priority in the list view still buckets one loaded
-  page.** The calendar and timeline no longer do: both ask for the date window
-  they draw, which is complete for the period on screen. The list's grouping is
-  the remaining case, and it says so.
+- ✅ **Grouped list headers count the whole group, not the loaded page.** This
+  turned out to be a bug rather than a limitation, and worse than the note
+  implied. The header showed `group.tasks.length` as a bare number beside a
+  name, so "Ana 30" read as Ana's workload when she might have 800. And a group
+  with nothing on the current page was dropped entirely - the code said "an
+  empty group is noise", which was true while the client held every task and
+  became false the moment it held a page. An absent name reads as "nothing
+  assigned", which is the interface stating something untrue rather than
+  something incomplete.
+
+  `/tasks/counts?groupBy=` now counts by status, assignee or priority
+  server-side. Headers read "12 of 340" whenever the two differ, and a group
+  the server knows about is rendered even when this page loaded none of it. The
+  total is the row count rather than the sum of the groups, because a shared
+  task appears under each of its assignees and summing would count it twice.
 - **M3 remains unmet at 407 ms against 100 ms.** Every unbounded read is now
   bounded; what is left is the cost of a synthetic load heavier than a board
   page in real use, not any one query.

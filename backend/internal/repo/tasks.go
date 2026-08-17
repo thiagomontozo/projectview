@@ -348,6 +348,52 @@ func (r *Tasks) CountMatching(ctx context.Context, q TaskQuery) (int64, error) {
 	return n, err
 }
 
+// CountByGroup returns how many tasks match in each group, in one query.
+//
+// The list view groups by status, priority or assignee, and used to count the
+// rows it happened to have loaded. That was fine while the client held every
+// task and became a lie the moment it held a page: a header read "Ana 30" when
+// Ana had 800, and a person whose tasks were all further down vanished from the
+// list entirely - which reads as "nothing assigned" rather than "not loaded".
+//
+// Assignee grouping counts a shared task under *each* of its assignees, which
+// is the same rule the interface has always used: showing it only under the
+// first name would hide shared work from everybody else.
+func (r *Tasks) CountByGroup(ctx context.Context, q TaskQuery, groupBy string) (map[string]int64, error) {
+	var sql string
+	switch groupBy {
+	case "assignee":
+		sql = `SELECT COALESCE(ta.user_id::text, 'unassigned'), count(*)
+		         FROM tasks t
+		         LEFT JOIN task_assignees ta ON ta.task_id = t.id
+		        WHERE ` + taskFilterSQL + `
+		        GROUP BY 1`
+	case "priority":
+		sql = `SELECT t.priority, count(*) FROM tasks t WHERE ` + taskFilterSQL + ` GROUP BY 1`
+	default:
+		sql = `SELECT t.status, count(*) FROM tasks t WHERE ` + taskFilterSQL + ` GROUP BY 1`
+	}
+
+	rows, err := r.store.Pool.Query(ctx, sql,
+		q.ProjectID, q.AssigneeIDs, q.Statuses, q.Priorities,
+		q.ParentOnly, q.Overdue, q.Search, q.DueFrom, q.DueTo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int64{}
+	for rows.Next() {
+		var key string
+		var n int64
+		if err := rows.Scan(&key, &n); err != nil {
+			return nil, err
+		}
+		out[key] = n
+	}
+	return out, rows.Err()
+}
+
 // CountByStatus returns how many tasks match in each status, in one query.
 //
 // The board needs a total per column, and asking for them one at a time would

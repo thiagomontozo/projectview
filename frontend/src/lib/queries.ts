@@ -353,6 +353,8 @@ export function pagedTasks(data: { pages: Page<Task>[] } | undefined): {
 
 export interface TaskCounts {
   byStatus: Record<string, number>;
+  /** Same map, keyed by whichever grouping was asked for. */
+  byGroup: Record<string, number>;
   total: number;
 }
 
@@ -363,8 +365,13 @@ export interface TaskCounts {
  * changes less often: the columns re-fetch as somebody loads more, while these
  * totals only move when the work does.
  */
-export function useTaskCounts(projectId: string | undefined, filters: TaskFilterInput) {
+export function useTaskCounts(
+  projectId: string | undefined,
+  filters: TaskFilterInput,
+  groupBy?: 'status' | 'assignee' | 'priority'
+) {
   const params = taskQueryParams(projectId ?? '', { filters });
+  if (groupBy) params.groupBy = groupBy;
   // The status filter is what decides which columns are shown, so it must not
   // also constrain their counts - a filtered-out column reads "0" rather than
   // disappearing, which looks like empty work rather than a hidden column.

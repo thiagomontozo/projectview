@@ -49,7 +49,13 @@ export default function ProjectBoardPage() {
   // Totals per column, under whatever filters are applied. The board needs
   // them to say "100 of 3,412" rather than implying the hundred is all there
   // is; the other views use the sum for the same reason.
-  const counts = useTaskCounts(id, view.state.filters);
+  // Keyed by the grouping in force, because the list's headers need a real
+  // total per group just as the board's columns do.
+  const counts = useTaskCounts(
+    id,
+    view.state.filters,
+    view.state.kind === 'board' ? 'status' : (view.state.groupBy === 'none' ? undefined : view.state.groupBy)
+  );
 
   // Every view except the board reads one paged stream rather than a page per
   // column. The board does not use this - its columns fetch their own - so it
@@ -234,6 +240,8 @@ export default function ProjectBoardPage() {
               tasks={visible}
               state={view.state}
               statuses={columns}
+              groupTotals={counts.data?.byGroup}
+              members={members}
               selected={selected}
               onToggleSelect={toggleSelect}
               onOpenTask={(task) => setModal({ task })}
