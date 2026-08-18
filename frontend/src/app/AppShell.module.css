@@ -310,3 +310,85 @@
     display: none;
   }
 }
+
+/* Spaces and their projects. Scrolls on its own so a long tree cannot push the
+   footer - which holds the administration links - off the screen. */
+.tree {
+  padding: var(--space-2) var(--space-2) 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.treeHeading {
+  margin: 0 0 var(--space-1, 4px);
+  padding: 0 var(--space-2);
+  font-size: var(--font-xs, 0.72rem);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.treeSpace {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-2);
+}
+
+.treeToggle {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 0;
+}
+
+.treeSpaceName {
+  flex: 1;
+  font-size: var(--font-sm);
+  /* Explicit rather than inherited: the sidebar's own text colour is a light
+     grey chosen for a dark sidebar, and inheriting it painted these names
+     white on white. */
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeCount {
+  font-size: var(--font-xs, 0.72rem);
+  color: var(--text-muted);
+}
+
+.treeProject {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 3px var(--space-2) 3px calc(var(--space-2) + 16px);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeProject:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.treeProjectActive {
+  background: var(--surface-active);
+  color: var(--text);
+}
+
+.treeKey {
+  font-size: var(--font-xs, 0.72rem);
+  opacity: 0.7;
+}

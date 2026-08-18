@@ -42,6 +42,23 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
   from the endpoint itself. It **suggests**; a person applies it
   from the intake screen, and nothing changes on its own. See
   [Triage suggestions](#triage-suggestions-optional).
+- **Whiteboards** — notes, boxes, circles and arrows on a panning canvas, for
+  the thinking that happens before there are tasks. The scene is one document
+  saved against the version it was opened at, so two people on one board cannot
+  silently overwrite each other.
+- **Sheets** — a small spreadsheet with a formula engine written for this
+  (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`, `ROUND`, `IF`, ranges, precedence,
+  cycle detection). What it cannot do it says: an unsupported function is
+  `#NAME?`, never a quietly wrong number.
+- **Clips** — screen recordings made in the browser and kept with the work they
+  describe, stored in the same object storage as attachments and reached the
+  same way, through a signed URL.
+- **Saved views** — an arrangement of view, grouping, filters and sort, named
+  and kept on the project. They belong to the project rather than to whoever
+  pressed save, so a team can agree on what "the board" means.
+- **Apps** — what this installation is connected to (directory, mail, SSO,
+  model, object storage, API tokens) with the state read from the running
+  configuration rather than guessed.
 - **Teams, projects, tasks and sub-tasks** — full CRUD. A sub-task is simply a
   task whose `parentTask` points at its parent, which allows nesting.
 - **Resource allocation** — anyone can be assigned to many tasks and projects
@@ -658,6 +675,41 @@ model into a broken form.
 a request to an address somebody chose. Private and loopback addresses are
 allowed deliberately — that is the main case — so the guard is narrow: the
 cloud metadata addresses are refused, checked both as written and as resolved.
+
+## Whiteboards, sheets and clips
+
+Three documents that belong to a project, and are opened by whoever may work in
+it. Deliberately small, and it is worth saying what that means rather than
+letting somebody discover it.
+
+**The whiteboard** holds notes, text, boxes, circles and arrows, with drag,
+resize, colour and zoom. It is not a design tool; there is no library of shapes,
+no connectors that follow what they connect, and no cursor-by-cursor presence.
+Building towards those would mean a year of work to be worse at it than the
+tools people already use, so the scene is one JSON document saved whole.
+
+**The sheet** evaluates formulas in the browser, with an engine written here.
+The libraries that would do this properly — Univer, HyperFormula, Handsontable —
+are each larger than this entire application's bundle, and two of the three are
+commercially licensed for exactly this use. Supported: cell references, ranges,
+the four operators with correct precedence, parentheses, comparisons, and
+`SUM`, `AVERAGE`, `COUNT`, `COUNTA`, `MIN`, `MAX`, `ROUND`, `ABS`, `IF`,
+`CONCAT`, `LEN`, `TODAY`. Not supported: absolute references, cross-sheet
+references, arrays, dates as values, anything iterative. Those produce `#NAME?`,
+because a sheet that reads an unsupported function as zero is worse than one
+that admits it.
+
+**Clips** are recorded by the browser (`getDisplayMedia` + `MediaRecorder`) and
+uploaded whole. Nothing is transcoded — the browser already produced a playable
+container, and re-encoding server-side would mean shipping ffmpeg to do worse
+what the browser does well. Recording needs object storage configured; without
+it the endpoint answers 503 like every other upload.
+
+**Both editable documents carry a version.** A save based on a version somebody
+else has already replaced is refused with 409 and the current document attached,
+so the interface can say what happened. Two people on one board is the ordinary
+case rather than the edge one, and last-write-wins would delete somebody's work
+with nothing on screen to say it happened.
 
 ## Configuration: environment, then the settings screen
 

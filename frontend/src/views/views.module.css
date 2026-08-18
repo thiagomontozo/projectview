@@ -653,3 +653,83 @@
     width: 140px;
   }
 }
+
+/* A group header folds. The count stays visible when it does, so folding hides
+   the rows without hiding the fact that they exist. */
+.groupToggle {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.groupAdd {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-sm);
+  padding: 0 var(--space-2);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+/* Revealed on hover or focus rather than always drawn: one of these per group
+   is a lot of buttons competing with the work itself. Focus matters as much as
+   hover - a keyboard has no hover. */
+.groupHeader:hover .groupAdd,
+.groupAdd:focus-visible {
+  opacity: 1;
+}
+
+/* The column picker hangs off its own header cell, so it opens where the
+   "+ Add column" control is rather than in a corner of the screen. */
+.addColumn {
+  position: relative;
+  white-space: nowrap;
+}
+
+.columnPicker {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  padding: var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / 18%));
+}
+
+.columnOption {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* A saved view sits in the same strip as the built-in ones, because that is
+   what it is to whoever uses it: another way to look at this project. */
+.savedView {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.savedViewRemove {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 4px;
+}

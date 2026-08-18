@@ -21,7 +21,8 @@
     "required": "obrigatório",
     "yes": "Sim",
     "no": "Não",
-    "of": "de"
+    "of": "de",
+    "description": "Descrição"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -39,7 +40,13 @@
     "goals": "Metas",
     "portfolio": "Portfólio",
     "adminSettings": "Administração",
-    "adminUsers": "Usuários"
+    "adminUsers": "Usuários",
+    "whiteboards": "Quadros brancos",
+    "sheets": "Planilhas",
+    "forms": "Formulários",
+    "clips": "Clipes",
+    "apps": "Aplicativos",
+    "unfiled": "Fora de um espaço"
   },
   "auth": {
     "signIn": "Entrar",
@@ -361,7 +368,13 @@
     "criticalPath": "Caminho crítico",
     "showingOf": "Mostrando {{loaded}} de {{total}} tarefas.",
     "loadMore": "Carregar mais",
-    "groupCountOf": "{{loaded}} de {{total}}"
+    "groupCountOf": "{{loaded}} de {{total}}",
+    "collapseGroup": "Recolher grupo",
+    "expandGroup": "Expandir grupo",
+    "addColumn": "Adicionar coluna",
+    "addView": "Visualização",
+    "viewName": "Nome da visualização",
+    "deleteView": "Excluir a visualização {{name}}"
   },
   "docs": {
     "title": "Documentos",
@@ -624,5 +637,87 @@
     "type_select": "Escolha",
     "type_checkbox": "Sim / não",
     "type_email": "E-mail"
+  },
+  "forms": {
+    "manage": "Gerenciar formulários",
+    "questionCount": "{{count}} pergunta",
+    "questionCount_other": "{{count}} perguntas"
+  },
+  "canvas": {
+    "whiteboards": "Quadros brancos",
+    "whiteboardsHint": "Uma superfície para o raciocínio que acontece antes de existirem tarefas.",
+    "newBoard": "Novo quadro",
+    "untitledBoard": "Quadro sem título",
+    "noBoards": "Nenhum quadro ainda",
+    "noBoardsBody": "Um quadro guarda notas, formas e setas — o formato de uma ideia antes de virar trabalho.",
+    "noProjects": "Crie um projeto primeiro: um quadro pertence a um.",
+    "revision": "Revisão {{version}}",
+    "confirmDeleteBoard": "Excluir este quadro? Não há como recuperá-lo.",
+    "backToBoards": "Todos os quadros",
+    "boardTitle": "Título do quadro",
+    "boardHint": "Escolha uma ferramenta e clique na tela. Clique duas vezes numa nota para escrever.",
+    "colour": "Cor",
+    "saved": "Salvo.",
+    "savedShort": "Salvo",
+    "conflict": "Outra pessoa salvou este quadro enquanto você editava. Reabra para ver a versão dela.",
+    "tool_select": "Selecionar",
+    "tool_note": "Nota",
+    "tool_text": "Texto",
+    "tool_rect": "Caixa",
+    "tool_ellipse": "Círculo",
+    "tool_arrow": "Seta"
+  },
+  "clips": {
+    "title": "Clipes",
+    "hint": "Grave a tela e guarde junto do trabalho a que ela se refere.",
+    "record": "Gravar tela",
+    "stop": "Parar ({{seconds}}s)",
+    "unsupported": "Este navegador não grava a tela.",
+    "none": "Nenhum clipe ainda",
+    "noneBody": "Uma gravação explica em vinte segundos o que um parágrafo explica mal.",
+    "play": "Reproduzir",
+    "uploaded": "A gravação foi salva.",
+    "confirmDelete": "Excluir este clipe? A gravação também sai do armazenamento.",
+    "defaultTitle": "Gravação, {{at}}"
+  },
+  "sheets": {
+    "title": "Planilhas",
+    "hint": "Números guardados ao lado do trabalho que descrevem, e não num anexo.",
+    "new": "Nova planilha",
+    "untitled": "Planilha sem título",
+    "none": "Nenhuma planilha ainda",
+    "noneBody": "Uma coluna de números com um total embaixo, sem sair do projeto.",
+    "confirmDelete": "Excluir esta planilha? Não há como recuperá-la.",
+    "backToSheets": "Todas as planilhas",
+    "sheetTitle": "Título da planilha",
+    "formulaBar": "Valor ou fórmula",
+    "formulaHint": "Um valor, ou =SUM(A1:A9)",
+    "addRows": "Mais linhas",
+    "addCols": "Mais colunas",
+    "conflict": "Outra pessoa salvou esta planilha enquanto você editava. Reabra para ver a versão dela."
+  },
+  "apps": {
+    "title": "Aplicativos",
+    "hint": "A que esta instalação está conectada, e a que poderia estar.",
+    "ad": "Active Directory",
+    "adBody": "Entrar com as credenciais da empresa e encontrar colegas no diretório ao montar uma equipe.",
+    "smtp": "E-mail",
+    "smtpBody": "Alertas de prazo e resumos, enviados pelo seu próprio servidor de e-mail.",
+    "oidc": "Login único",
+    "oidcBody": "Qualquer provedor OpenID Connect. Os endpoints são descobertos pelo emissor.",
+    "ai": "Modelo",
+    "aiBody": "Um endpoint compatível com a API da OpenAI, para sugerir prioridade e responsável nas solicitações.",
+    "storage": "Armazenamento de arquivos",
+    "storageBody": "Armazenamento de objetos compatível com S3, que guarda anexos e clipes.",
+    "webhooks": "Tokens de API",
+    "webhooksBody": "Tokens de serviço para scripts e outros sistemas que precisam ler ou escrever aqui.",
+    "state_on": "Conectado",
+    "state_off": "Não configurado",
+    "state_unknown": "Pergunte a um administrador",
+    "viaSettings": "Configurado nas configurações do sistema",
+    "viaEnvironment": "Configurado na implantação",
+    "configure": "Configurar",
+    "moreTitle": "Por que não há uma loja de aplicativos aqui",
+    "moreBody": "Um catálogo pressupõe desenvolvedores externos publicando nele. Isto é uma ferramenta interna, então o que preencheria um catálogo é a lista acima: os sistemas que a sua organização já usa. O resto se alcança pela API, com um token de serviço."
   }
 }

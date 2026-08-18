@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import clsx from 'clsx';
@@ -19,6 +20,7 @@ import {
   Users
 } from '../ui/icons';
 import type { GroupBy, ViewKind, ViewState } from './useViewState';
+import type { SavedView } from '../types';
 import type { ProjectStatusColumn, PublicUser } from '../types';
 
 const VIEWS: Array<{ kind: ViewKind; labelKey: string; Icon: typeof Dashboard }> = [
@@ -41,6 +43,18 @@ interface Props {
   onGroupByChange: (groupBy: GroupBy) => void;
   onFiltersChange: (update: Partial<ViewState['filters']>) => void;
   onClearFilters: () => void;
+  /**
+   * Views somebody saved on this project.
+   *
+   * The arrangement always existed; it just lived in a React state that a
+   * reload discarded, so everybody rebuilt the same filter every morning and no
+   * two people could agree on what "the board" meant. These are shared - a
+   * saved view belongs to the project, not to whoever pressed the button.
+   */
+  savedViews?: SavedView[];
+  onApplyView?: (view: SavedView) => void;
+  onSaveView?: (name: string) => void;
+  onDeleteView?: (id: string) => void;
 }
 
 export function ViewToolbar({
@@ -51,9 +65,15 @@ export function ViewToolbar({
   onKindChange,
   onGroupByChange,
   onFiltersChange,
-  onClearFilters
+  onClearFilters,
+  savedViews = [],
+  onApplyView,
+  onSaveView,
+  onDeleteView
 }: Props) {
   const { t } = useTranslation();
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState('');
 
   const toggle = (list: string[], value: string) =>
     list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -78,6 +98,62 @@ export function ViewToolbar({
             {t(labelKey)}
           </button>
         ))}
+
+        {savedViews.map((view) => (
+          <span key={view.id} className={styles.savedView}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={false}
+              className={styles.switcherItem}
+              onClick={() => onApplyView?.(view)}
+            >
+              {view.name}
+            </button>
+            {onDeleteView && (
+              <button
+                type="button"
+                className={styles.savedViewRemove}
+                aria-label={t('views.deleteView', { name: view.name })}
+                onClick={() => onDeleteView(view.id)}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        ))}
+
+        {onSaveView &&
+          (naming ? (
+            <form
+              className={styles.savedView}
+              onSubmit={(event) => {
+                event.preventDefault();
+                const name = draftName.trim();
+                if (!name) return;
+                onSaveView(name);
+                setDraftName('');
+                setNaming(false);
+              }}
+            >
+              <Input
+                autoFocus
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                placeholder={t('views.viewName')}
+                aria-label={t('views.viewName')}
+                style={{ width: 160 }}
+                onKeyDown={(event) => event.key === 'Escape' && setNaming(false)}
+              />
+              <Button type="submit" size="sm" variant="primary">
+                {t('common.save')}
+              </Button>
+            </form>
+          ) : (
+            <button type="button" className={styles.switcherItem} onClick={() => setNaming(true)}>
+              + {t('views.addView')}
+            </button>
+          ))}
       </div>
 
       <div className={styles.toolbarSpacer} />

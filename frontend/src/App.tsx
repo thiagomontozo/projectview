@@ -24,6 +24,11 @@ const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const WhiteboardsPage = lazy(() => import('./pages/WhiteboardsPage'));
+const ClipsPage = lazy(() => import('./pages/ClipsPage'));
+const SheetsPage = lazy(() => import('./pages/SheetsPage'));
+const FormsPage = lazy(() => import('./pages/FormsPage'));
+const AppsPage = lazy(() => import('./pages/AppsPage'));
 
 function RouteFallback() {
   const { t } = useTranslation();
@@ -80,6 +85,11 @@ export default function App() {
           <Route path="docs" element={<DocsPage />} />
           <Route path="goals" element={<GoalsPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
+          <Route path="whiteboards" element={<WhiteboardsPage />} />
+          <Route path="clips" element={<ClipsPage />} />
+          <Route path="sheets" element={<SheetsPage />} />
+          <Route path="forms" element={<FormsPage />} />
+          <Route path="apps" element={<AppsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admin/users" element={<AdminUsersPage />} />
           <Route path="admin/settings" element={<AdminSettingsPage />} />

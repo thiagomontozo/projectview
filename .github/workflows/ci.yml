@@ -243,7 +243,7 @@ jobs:
                    0004_product_engine 0005_collaboration 0006_enterprise \
                    0007_app_settings 0008_attachments \
                    0009_recurrence_and_templates \
-                   0010_chat_files_and_intake                    0011_intake_triage; do
+                   0010_chat_files_and_intake                    0011_intake_triage                    0012_canvas_clips_sheets_views; do
             applied="$(psql "SELECT count(*) FROM schema_migrations WHERE version='$v'")"
             [ "$applied" = "1" ] || { echo "$v not recorded as applied" >&2; exit 1; }
           done

@@ -6,6 +6,7 @@ import { Avatar, AvatarGroup, Badge } from '../ui/display';
 import { ArrowDown, ArrowUp } from '../ui/icons';
 import { formatDate, isOverdue, priorityTone, toDateInput } from '../lib/format';
 import type { SortBy, ViewState } from './useViewState';
+import type { FieldDefinition } from '../lib/queries';
 import type { ProjectStatusColumn, Task } from '../types';
 
 interface Props {
@@ -18,6 +19,19 @@ interface Props {
   onSort: (sortBy: SortBy) => void;
   onOpenTask: (task: Task) => void;
   onPatchTask: (taskId: string, patch: Record<string, unknown>) => void;
+  /**
+   * The project's custom fields, offered as columns.
+   *
+   * They existed in the API and on the task dialog, but only ever one task at a
+   * time - which is the one place a custom field is least useful. A field
+   * called "Client" or "Cost centre" is asked as a question about the whole
+   * list, and answering it meant opening tasks one by one.
+   */
+  customFields?: FieldDefinition[];
+  /** Which of them are shown, by key. Nothing by default: an extra column is a
+   *  decision, and six of them arriving unasked is a table nobody can read. */
+  shownFields?: string[];
+  onShownFieldsChange?: (keys: string[]) => void;
 }
 
 /**
@@ -36,9 +50,13 @@ export function TableView({
   onToggleSelectAll,
   onSort,
   onOpenTask,
-  onPatchTask
+  onPatchTask,
+  customFields = [],
+  shownFields = [],
+  onShownFieldsChange
 }: Props) {
   const { t } = useTranslation();
+  const [picking, setPicking] = useState(false);
 
   const allSelected = tasks.length > 0 && tasks.every((task) => selected.has(task.id));
 
@@ -50,6 +68,18 @@ export function TableView({
     { key: 'dueDate', labelKey: 'task.due', sortable: true },
     { key: 'assignees', labelKey: 'task.assignees', sortable: false }
   ];
+
+  // Only fields that still exist. A column list outlives the field it names -
+  // somebody deletes "Cost centre" and every row would otherwise render an
+  // empty column with a heading nothing can fill.
+  const extraColumns = customFields.filter((field) => shownFields.includes(field.key));
+
+  function toggleField(key: string) {
+    if (!onShownFieldsChange) return;
+    onShownFieldsChange(
+      shownFields.includes(key) ? shownFields.filter((k) => k !== key) : [...shownFields, key]
+    );
+  }
 
   return (
     <div className={styles.tableWrap}>
@@ -90,6 +120,39 @@ export function TableView({
                 )}
               </th>
             ))}
+
+            {extraColumns.map((field) => (
+              <th key={field.key} scope="col">
+                {field.label}
+              </th>
+            ))}
+
+            {customFields.length > 0 && onShownFieldsChange && (
+              <th scope="col" className={styles.addColumn}>
+                <button
+                  type="button"
+                  className={styles.sortButton}
+                  aria-expanded={picking}
+                  onClick={() => setPicking((open) => !open)}
+                >
+                  + {t('views.addColumn')}
+                </button>
+                {picking && (
+                  <div className={styles.columnPicker} role="group" aria-label={t('views.addColumn')}>
+                    {customFields.map((field) => (
+                      <label key={field.key} className={styles.columnOption}>
+                        <input
+                          type="checkbox"
+                          checked={shownFields.includes(field.key)}
+                          onChange={() => toggleField(field.key)}
+                        />
+                        {field.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </th>
+            )}
           </tr>
         </thead>
 
@@ -179,12 +242,38 @@ export function TableView({
                   </AvatarGroup>
                 </div>
               </td>
+
+              {extraColumns.map((field) => (
+                <td key={field.key}>
+                  <div className={styles.cell}>{customValue(task, field)}</div>
+                </td>
+              ))}
+
+              {customFields.length > 0 && onShownFieldsChange && <td />}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+/**
+ * Renders one custom value.
+ *
+ * Read-only here on purpose. The types are eight different editors - a
+ * multi-select is not a text box - and half an editing story in a table cell is
+ * worse than none: the task dialog already edits all eight properly, and this
+ * column exists so somebody can see the value across a list without opening
+ * anything.
+ */
+function customValue(task: Task, field: FieldDefinition): string {
+  const stored = (task as Task & { customFields?: Record<string, unknown> }).customFields ?? {};
+  const value = stored[field.key];
+  if (value === undefined || value === null || value === '') return '';
+  if (Array.isArray(value)) return value.join(', ');
+  if (typeof value === 'boolean') return value ? '✓' : '';
+  return String(value);
 }
 
 function EditableText({

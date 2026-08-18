@@ -7,6 +7,7 @@ import overlays from '../ui/overlays.module.css';
 import { useAuth } from '../lib/auth';
 import { useNotifications, useMarkAllNotificationsRead } from '../lib/queries';
 import { useCommandPalette } from './CommandPalette';
+import { SidebarTree } from './SidebarTree';
 import { Avatar } from '../ui/display';
 import { Button } from '../ui/Button';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Tooltip } from '../ui/Menu';
@@ -16,9 +17,11 @@ import {
   Chart,
   Chat,
   CheckSquare,
+  Command,
   Dashboard,
   FileText,
   Folder,
+  Inbox,
   Layers,
   LogOut,
   Moon,
@@ -28,6 +31,7 @@ import {
   Settings,
   Shield,
   Sun,
+  Table,
   Target,
   Users
 } from '../ui/icons';
@@ -53,7 +57,12 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/goals', labelKey: 'nav.goals', Icon: Target },
   { to: '/portfolio', labelKey: 'nav.portfolio', Icon: Briefcase },
   { to: '/chat', labelKey: 'nav.chat', Icon: Chat },
-  { to: '/docs', labelKey: 'nav.docs', Icon: FileText }
+  { to: '/docs', labelKey: 'nav.docs', Icon: FileText },
+  { to: '/whiteboards', labelKey: 'nav.whiteboards', Icon: Layers },
+  { to: '/sheets', labelKey: 'nav.sheets', Icon: Table },
+  { to: '/forms', labelKey: 'nav.forms', Icon: Inbox },
+  { to: '/clips', labelKey: 'nav.clips', Icon: Command },
+  { to: '/apps', labelKey: 'nav.apps', Icon: Puzzle }
 ];
 
 export function AppShell() {
@@ -108,6 +117,11 @@ export function AppShell() {
             </NavLink>
           ))}
         </div>
+
+        {/* Below the fixed navigation rather than replacing it: the tree
+            answers "where does this project live", the links above answer
+            "what can I do", and collapsing the two would lose one of them. */}
+        <SidebarTree />
 
         <div className={styles.sidebarFooter}>
           {/* Rendered only for administrators. The server refuses the routes

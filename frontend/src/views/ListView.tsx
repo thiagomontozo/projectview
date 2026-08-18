@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
@@ -28,6 +28,15 @@ interface Props {
   groupTotals?: Record<string, number>;
   /** Everyone who could own a group, so a person with work off-page still appears. */
   members?: PublicUser[];
+  /**
+   * Adds a task straight into a group.
+   *
+   * The group is the context somebody is already in - they are looking at "In
+   * progress" and want one more thing in it - so the button carries that
+   * context rather than opening a form where the first thing to do is set the
+   * value that was on screen a moment ago.
+   */
+  onAddInGroup?: (group: { by: ViewState['groupBy']; key: string }) => void;
 }
 
 type Row =
@@ -40,6 +49,7 @@ type Row =
       count: number;
       /** What the server says the group really holds, when it knows. */
       total?: number;
+      collapsed: boolean;
     }
   | { kind: 'task'; key: string; task: Task };
 
@@ -78,10 +88,23 @@ export function ListView({
   onToggleSelect,
   onOpenTask,
   groupTotals,
-  members
+  members,
+  onAddInGroup
 }: Props) {
   const { t } = useTranslation();
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // Which groups are folded away. Kept here rather than in the saved view: it
+  // is a reading posture, not a definition of the view, and somebody who folds
+  // "Completed" to get it out of the way has not changed what the view is.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggle = useCallback((key: string) => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }, []);
 
   const rows = useMemo<Row[]>(() => {
     const groups = groupTasks(tasks, state.groupBy, statuses, {
@@ -110,6 +133,7 @@ export function ListView({
       // empty. When the server says it holds work that simply is not on this
       // page, hiding it would tell the reader that person has nothing.
       if (group.tasks.length === 0 && state.groupBy !== 'none' && !total) return;
+      const folded = collapsed.has(group.key);
       if (state.groupBy !== 'none') {
         flat.push({
           kind: 'group',
@@ -117,9 +141,14 @@ export function ListView({
           label: group.label,
           color: group.color,
           count: group.tasks.length,
-          total
+          total,
+          collapsed: folded
         });
       }
+      // A folded group still contributes its header, and its header still
+      // carries the count - so folding hides the rows without hiding the fact
+      // that they exist.
+      if (folded) return;
       group.tasks.forEach((task) => flat.push({ kind: 'task', key: `${group.key}-${task.id}`, task }));
     });
     return flat;
@@ -127,7 +156,7 @@ export function ListView({
     // render, and without them the memo would keep the headers it computed
     // before the server answered - which is the wrong number this change
     // exists to remove.
-  }, [tasks, state.groupBy, statuses, groupTotals, members, t]);
+  }, [tasks, state.groupBy, statuses, groupTotals, members, collapsed, t]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -156,6 +185,15 @@ export function ListView({
             >
               {row.kind === 'group' ? (
                 <div className={styles.groupHeader}>
+                  <button
+                    type="button"
+                    className={styles.groupToggle}
+                    aria-expanded={!row.collapsed}
+                    aria-label={row.collapsed ? t('views.expandGroup') : t('views.collapseGroup')}
+                    onClick={() => toggle(row.key.replace(/^group-/, ''))}
+                  >
+                    <span aria-hidden="true">{row.collapsed ? '▸' : '▾'}</span>
+                  </button>
                   {row.color && (
                     <span className={styles.groupDot} style={{ background: row.color }} aria-hidden="true" />
                   )}
@@ -167,6 +205,17 @@ export function ListView({
                       ? t('views.groupCountOf', { loaded: row.count, total: row.total })
                       : row.count}
                   </span>
+                  {onAddInGroup && state.groupBy !== 'none' && (
+                    <button
+                      type="button"
+                      className={styles.groupAdd}
+                      onClick={() =>
+                        onAddInGroup({ by: state.groupBy, key: row.key.replace(/^group-/, '') })
+                      }
+                    >
+                      + {t('board.newTask')}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <TaskRow

@@ -23,10 +23,12 @@ import {
   useProjectTaskPage,
   useSaveTask,
   useSchedule,
+  useCustomFields,
   useTaskCounts,
   useUsers
 } from '../lib/queries';
-import { statusOf } from '../lib/api';
+import { errorMessage, statusOf } from '../lib/api';
+import { useDeleteView, useSaveView, useSavedViews } from '../lib/canvas';
 import type { Task } from '../types';
 
 // Loaded on demand: the form builder is opened rarely and has no business
@@ -36,6 +38,10 @@ const IntakeDialog = lazy(() => import('../components/IntakeDialog'));
 interface ModalState {
   task?: Task;
   defaultStatus?: string;
+  // Set when a task is added from inside a group that is not a status group,
+  // so the value that was on screen is the value the task arrives with.
+  defaultPriority?: string;
+  defaultAssignee?: string;
 }
 
 export default function ProjectBoardPage() {
@@ -44,6 +50,10 @@ export default function ProjectBoardPage() {
   const toast = useToast();
 
   const view = useViewState(id);
+  const savedViews = useSavedViews(id);
+  const saveView = useSaveView(id ?? '');
+  const deleteView = useDeleteView(id ?? '');
+  const customFields = useCustomFields(id);
 
   const project = useProject(id);
   const { data: allUsers = [] } = useUsers();
@@ -103,6 +113,10 @@ export default function ProjectBoardPage() {
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [intakeOpen, setIntakeOpen] = useState(false);
+  // Which custom fields are shown as columns. Per session rather than saved: a
+  // column somebody added to answer one question should not become part of what
+  // the project looks like for everybody.
+  const [shownFields, setShownFields] = useState<string[]>([]);
 
   const columns = useMemo(
     () => (project.data?.statuses ?? []).slice().sort((a, b) => a.order - b.order),
@@ -200,6 +214,25 @@ export default function ProjectBoardPage() {
         onGroupByChange={view.setGroupBy}
         onFiltersChange={view.setFilters}
         onClearFilters={view.clearFilters}
+        savedViews={savedViews.data ?? []}
+        onApplyView={(saved) => view.apply({ ...saved, filters: saved.filters as Partial<typeof view.state.filters> })}
+        onSaveView={(name) =>
+          saveView.mutate(
+            {
+              name,
+              kind: view.state.kind,
+              groupBy: view.state.groupBy,
+              // Widened once, here: the stored shape is deliberately open
+              // (a view saved last year should still load after a filter is
+              // added), while the interface's own filters are exact.
+              filters: { ...view.state.filters },
+              sortBy: view.state.sortBy,
+              sortDirection: view.state.sortDirection
+            },
+            { onError: (error) => toast.error(errorMessage(error, t('errors.genericBody'))) }
+          )
+        }
+        onDeleteView={(id) => deleteView.mutate(id)}
       />
 
       {/* Every view below the board draws from a page rather than the whole
@@ -256,6 +289,16 @@ export default function ProjectBoardPage() {
               selected={selected}
               onToggleSelect={toggleSelect}
               onOpenTask={(task) => setModal({ task })}
+              // The group carries into the new task, because that is the
+              // context somebody is already in: they are looking at "In
+              // progress" and want one more thing in it.
+              onAddInGroup={(group) =>
+                setModal({
+                  defaultStatus: group.by === 'status' ? group.key : columns[0]?.key,
+                  defaultPriority: group.by === 'priority' ? group.key : undefined,
+                  defaultAssignee: group.by === 'assignee' && group.key !== 'unassigned' ? group.key : undefined
+                })
+              }
             />
           )}
 
@@ -270,6 +313,9 @@ export default function ProjectBoardPage() {
               onSort={view.setSort}
               onOpenTask={(task) => setModal({ task })}
               onPatchTask={patchTask}
+              customFields={customFields.data ?? []}
+              shownFields={shownFields}
+              onShownFieldsChange={setShownFields}
             />
           )}
 
@@ -311,6 +357,8 @@ export default function ProjectBoardPage() {
           project={project.data}
           task={modal.task}
           defaultStatus={modal.defaultStatus}
+          defaultPriority={modal.defaultPriority}
+          defaultAssignee={modal.defaultAssignee}
           users={members}
           onClose={() => setModal(null)}
         />

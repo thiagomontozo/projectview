@@ -448,6 +448,70 @@ purpose.
 
 ---
 
+### ✅ The gap against ClickUp, closed — done
+
+Asked by comparing this application's screens against ClickUp's, side by side.
+Ten product tiles and one list view, and the honest answer at the time was that
+the list was nearly complete and the product menu was half missing. The
+instruction was to implement all of it, so all of it was implemented.
+
+**The list view** gained the five things the comparison found: groups fold (and
+keep their count when folded, so hiding rows never reads as an empty group),
+each group can take a new task with its own value carried in, custom fields can
+be added as table columns, a view arrangement can be named and saved, and the
+sidebar shows spaces with their projects.
+
+Saved views are shared rather than personal, which is the decision worth
+recording: the arrangement always existed but lived in a React state that a
+reload discarded, so everybody rebuilt the same filter every morning and no two
+people could agree on what "the board" meant. Folding is the opposite - kept in
+the browser, because folding a column to get it out of the way is a reading
+posture, not a definition of the view.
+
+**The four products** were built to a deliberate size, and each says what it is
+not:
+
+- **Whiteboards** — notes, text, boxes, circles, arrows, with drag, resize and
+  zoom. Not a design tool.
+- **Sheets** — a formula engine written here rather than pulled in, because the
+  three libraries that would do it properly are each larger than this whole
+  bundle and two are commercially licensed for this use. An unsupported
+  function answers `#NAME?` rather than a wrong number.
+- **Clips** — recorded by the browser, stored beside attachments, played from a
+  signed URL. Nothing is transcoded.
+- **Apps** — not a marketplace, which would be an empty shop with the lights
+  on. It answers the question nobody could answer before without reading an
+  environment file: is our directory actually wired up?
+
+Forms were the fifth: the feature was complete and reachable only from inside a
+project board, so the people who field requests had no route to it. It is now a
+screen of its own, reusing the same builder rather than growing a second one.
+
+Both editable documents carry a version and refuse a stale write. Two people on
+one board is the ordinary case, and last-write-wins would delete somebody's work
+with nothing on screen to say so.
+
+Three defects were found by building this, and all three are worth keeping:
+
+- **Four route groups were registered outside the authenticated group.** The
+  symptom was not a security hole announcing itself - it was a nil pointer
+  panic inside a permission check that never ran, because nothing had
+  established who was calling. There is now a test that walks every route and
+  asserts an anonymous request gets 401, with a short list of genuinely public
+  routes that a reviewer can see. It also fails if an entry in that list stops
+  matching a real route.
+- **A new note lost whatever was typed into it first.** The browser focuses the
+  element that was pressed *after* React mounts the textarea, so the canvas took
+  the focus straight back. Found by the browser suite, not by using it.
+- **Space names in the new sidebar tree were invisible** - they inherited the
+  sidebar's own text colour, a light grey meant for a dark sidebar.
+
+Verified: 376 smoke assertions, 31 browser tests, 60 frontend tests, the Go
+suite race-clean, and a script that drives all four document endpoints
+including both stale-write refusals.
+
+---
+
 ## Reported by a user
 
 ### ✅ Teams could be created but never staffed — fixed

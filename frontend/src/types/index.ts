@@ -368,3 +368,76 @@ export interface IntakeSubmission {
   /** Set when a person applied the suggestion. */
   acceptedAt?: string | null;
 }
+
+/* --- Views, boards, sheets and clips ---------------------------------------- */
+
+/** A view somebody arranged and wants back, rather than rebuilt every morning. */
+export interface SavedView {
+  id: string;
+  projectId: string;
+  name: string;
+  kind: 'board' | 'list' | 'table' | 'calendar' | 'timeline' | 'workload';
+  groupBy: 'none' | 'status' | 'assignee' | 'priority';
+  filters: Record<string, unknown>;
+  sortBy?: string;
+  sortDirection?: string;
+  createdAt: string;
+}
+
+/** One thing on a whiteboard. The scene is a list of these and nothing else. */
+export interface BoardItem {
+  id: string;
+  kind: 'note' | 'text' | 'rect' | 'ellipse' | 'arrow';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text?: string;
+  color?: string;
+}
+
+export interface BoardScene {
+  items: BoardItem[];
+}
+
+export interface Whiteboard {
+  id: string;
+  projectId: string;
+  title: string;
+  scene: BoardScene;
+  /** Bumped on every save. A write against an old one is refused, not merged. */
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A cell holds either a literal value or a formula, never both. */
+export interface SheetCell {
+  /** The literal, as typed. */
+  v?: string;
+  /** The formula, including its leading "=". */
+  f?: string;
+}
+
+export interface Spreadsheet {
+  id: string;
+  projectId: string;
+  title: string;
+  cells: Record<string, SheetCell>;
+  rows: number;
+  cols: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Clip {
+  id: string;
+  projectId: string;
+  taskId?: string;
+  title: string;
+  contentType: string;
+  sizeBytes: number;
+  durationMs?: number;
+  createdAt: string;
+}

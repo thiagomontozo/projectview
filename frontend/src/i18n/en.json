@@ -21,7 +21,8 @@
     "required": "required",
     "yes": "Yes",
     "no": "No",
-    "of": "of"
+    "of": "of",
+    "description": "Description"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -39,7 +40,13 @@
     "goals": "Goals",
     "portfolio": "Portfolio",
     "adminSettings": "Administration",
-    "adminUsers": "Users"
+    "adminUsers": "Users",
+    "whiteboards": "Whiteboards",
+    "sheets": "Sheets",
+    "forms": "Forms",
+    "clips": "Clips",
+    "apps": "Apps",
+    "unfiled": "Not in a space"
   },
   "auth": {
     "signIn": "Sign in",
@@ -361,7 +368,13 @@
     "criticalPath": "Critical path",
     "showingOf": "Showing {{loaded}} of {{total}} tasks.",
     "loadMore": "Load more",
-    "groupCountOf": "{{loaded}} of {{total}}"
+    "groupCountOf": "{{loaded}} of {{total}}",
+    "collapseGroup": "Collapse group",
+    "expandGroup": "Expand group",
+    "addColumn": "Add column",
+    "addView": "View",
+    "viewName": "Name this view",
+    "deleteView": "Delete the view {{name}}"
   },
   "docs": {
     "title": "Docs",
@@ -624,5 +637,87 @@
     "type_select": "Choice",
     "type_checkbox": "Yes / no",
     "type_email": "E-mail"
+  },
+  "forms": {
+    "manage": "Manage forms",
+    "questionCount": "{{count}} question",
+    "questionCount_other": "{{count}} questions"
+  },
+  "canvas": {
+    "whiteboards": "Whiteboards",
+    "whiteboardsHint": "A surface for the thinking that happens before there are tasks.",
+    "newBoard": "New board",
+    "untitledBoard": "Untitled board",
+    "noBoards": "No boards yet",
+    "noBoardsBody": "A board holds notes, shapes and arrows — the shape of an idea before it is work.",
+    "noProjects": "Create a project first: a board belongs to one.",
+    "revision": "Revision {{version}}",
+    "confirmDeleteBoard": "Delete this board? It cannot be recovered.",
+    "backToBoards": "All boards",
+    "boardTitle": "Board title",
+    "boardHint": "Pick a tool, then click the canvas. Double-click a note to write in it.",
+    "colour": "Colour",
+    "saved": "Saved.",
+    "savedShort": "Saved",
+    "conflict": "Somebody else saved this board while you were editing. Reopen it to see their version.",
+    "tool_select": "Select",
+    "tool_note": "Note",
+    "tool_text": "Text",
+    "tool_rect": "Box",
+    "tool_ellipse": "Circle",
+    "tool_arrow": "Arrow"
+  },
+  "clips": {
+    "title": "Clips",
+    "hint": "Record your screen and keep it with the work it is about.",
+    "record": "Record screen",
+    "stop": "Stop ({{seconds}}s)",
+    "unsupported": "This browser cannot record a screen.",
+    "none": "No clips yet",
+    "noneBody": "A recording explains in twenty seconds what a paragraph does badly.",
+    "play": "Play",
+    "uploaded": "The recording was saved.",
+    "confirmDelete": "Delete this clip? The recording is removed from storage too.",
+    "defaultTitle": "Recording, {{at}}"
+  },
+  "sheets": {
+    "title": "Sheets",
+    "hint": "Numbers kept beside the work they describe, instead of in an attachment.",
+    "new": "New sheet",
+    "untitled": "Untitled sheet",
+    "none": "No sheets yet",
+    "noneBody": "A column of numbers with a total under it, without leaving the project.",
+    "confirmDelete": "Delete this sheet? It cannot be recovered.",
+    "backToSheets": "All sheets",
+    "sheetTitle": "Sheet title",
+    "formulaBar": "Value or formula",
+    "formulaHint": "A value, or =SUM(A1:A9)",
+    "addRows": "More rows",
+    "addCols": "More columns",
+    "conflict": "Somebody else saved this sheet while you were editing. Reopen it to see their version."
+  },
+  "apps": {
+    "title": "Apps",
+    "hint": "What this installation is connected to, and what it could be.",
+    "ad": "Active Directory",
+    "adBody": "Sign in with company credentials, and find colleagues in the directory when staffing a team.",
+    "smtp": "E-mail",
+    "smtpBody": "Deadline alerts and digests, sent through your own mail server.",
+    "oidc": "Single sign-on",
+    "oidcBody": "Any OpenID Connect provider. Endpoints are discovered from the issuer.",
+    "ai": "Model",
+    "aiBody": "An OpenAI-compatible endpoint, used to suggest a priority and an assignee on requests.",
+    "storage": "File storage",
+    "storageBody": "S3-compatible object storage, holding attachments and clips.",
+    "webhooks": "API tokens",
+    "webhooksBody": "Service tokens for scripts and other systems that need to read or write here.",
+    "state_on": "Connected",
+    "state_off": "Not set up",
+    "state_unknown": "Ask an administrator",
+    "viaSettings": "Configured in system settings",
+    "viaEnvironment": "Configured in the deployment",
+    "configure": "Configure",
+    "moreTitle": "Why there is no app store here",
+    "moreBody": "A catalogue implies outside developers publishing to it. This is an internal tool, so what would fill one is the list above: the systems your organisation already runs. Anything else is reached through the API with a service token."
   }
 }

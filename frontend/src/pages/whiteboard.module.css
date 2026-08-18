@@ -1,0 +1,167 @@
+.toolbarRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.cardOpen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+/* The surface is its own scroll container rather than growing the page: a board
+   is panned and zoomed, and a canvas that pushes the footer down every time
+   somebody drags a note is a canvas fighting the page. */
+.surface {
+  position: relative;
+  height: min(70vh, 640px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(circle, var(--border-subtle) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--surface);
+  touch-action: none;
+}
+
+.surface[data-tool='note'],
+.surface[data-tool='text'],
+.surface[data-tool='rect'],
+.surface[data-tool='ellipse'],
+.surface[data-tool='arrow'] {
+  cursor: crosshair;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+.arrowLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.item {
+  position: absolute;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 12%));
+  color: #1f2430;
+  cursor: grab;
+  overflow: hidden;
+}
+
+.item[data-kind='rect'] {
+  border: 2px solid rgb(0 0 0 / 25%);
+}
+
+.item[data-kind='ellipse'] {
+  border-radius: 50%;
+  border: 2px solid rgb(0 0 0 / 25%);
+}
+
+.item[data-kind='text'] {
+  box-shadow: none;
+  color: var(--text);
+}
+
+.item[data-selected='true'] {
+  outline: 2px solid var(--brand-500, var(--accent));
+  outline-offset: 2px;
+}
+
+.itemText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--font-sm);
+}
+
+.itemInput {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  resize: none;
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+
+.resizeHandle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--surface);
+  border: 2px solid var(--brand-500, var(--accent));
+  cursor: nwse-resize;
+}
+
+/* An arrow is a line, and a line is hard to grab. This is its handle. */
+.arrowHandle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--text-muted);
+  background: var(--surface);
+  padding: 0;
+  cursor: grab;
+}
+
+.arrowHandle[data-selected='true'] {
+  border-color: var(--brand-500, var(--accent));
+}
+
+.hint {
+  position: absolute;
+  inset: auto 0 50% 0;
+  text-align: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.colors {
+  display: flex;
+  gap: 4px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}

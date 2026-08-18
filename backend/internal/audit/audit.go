@@ -69,6 +69,13 @@ const (
 	// suggestions were any good.
 	ActionTriageAccepted = "intake.triage_accepted"
 
+	ActionWhiteboardCreated = "whiteboard.created"
+	ActionWhiteboardDeleted = "whiteboard.deleted"
+	// Recording a screen captures whatever was on it, which can include a
+	// system nobody meant to show. Worth a line in the trail for the same
+	// reason an export is.
+	ActionClipRecorded = "clip.recorded"
+
 	ActionTemplateCreated = "template.created"
 	ActionTemplateApplied = "template.applied"
 

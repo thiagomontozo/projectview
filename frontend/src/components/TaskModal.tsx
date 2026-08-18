@@ -36,11 +36,23 @@ interface Props {
   project: Project;
   task?: Task;
   defaultStatus?: string;
+  /** Carried in when a task is added from inside a group, so the value that was
+   *  on screen is the value the task arrives with. */
+  defaultPriority?: string;
+  defaultAssignee?: string;
   users: PublicUser[];
   onClose: () => void;
 }
 
-export default function TaskModal({ project, task, defaultStatus, users, onClose }: Props) {
+export default function TaskModal({
+  project,
+  task,
+  defaultStatus,
+  defaultPriority,
+  defaultAssignee,
+  users,
+  onClose
+}: Props) {
   const { t } = useTranslation();
   const toast = useToast();
   const isEdit = Boolean(task?.id);
@@ -60,8 +72,8 @@ export default function TaskModal({ project, task, defaultStatus, users, onClose
     title: task?.title ?? '',
     description: task?.description ?? '',
     status: task?.status ?? defaultStatus ?? project.statuses[0]?.key ?? '',
-    priority: task?.priority ?? 'medium',
-    assignees: task?.assignees?.map((a) => a.id) ?? [],
+    priority: task?.priority ?? defaultPriority ?? 'medium',
+    assignees: task?.assignees?.map((a) => a.id) ?? (defaultAssignee ? [defaultAssignee] : []),
     startDate: toDateInput(task?.startDate),
     dueDate: toDateInput(task?.dueDate),
     estimateHours: task?.estimateHours ?? 0

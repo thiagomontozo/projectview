@@ -525,6 +525,42 @@ check "closing a form closes it" "200"     "$(status_of -X PATCH "$BASE/api/inta
 check "a closed form is not reachable" "404" "$(status_of "$BASE/api/public/intake/$intake_slug")"
 
 # ---------------------------------------------------------------------------
+section "Boards, sheets, clips and saved views"
+
+board="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/whiteboards" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"title":"Smoke board"}')"
+board_id="$(json_str "$board" id)"
+contains "a board starts at version 1" "$board" '"version":1'
+
+# The version is the whole design: two people on one board is the ordinary case,
+# and a save based on a version somebody replaced must be refused rather than
+# quietly applied over their work.
+saved_board="$("${CURL[@]}" -X PUT "$BASE/api/whiteboards/$board_id" -H "$AUTH"     -H 'Content-Type: application/json'     -d '{"scene":{"items":[{"id":"n1","kind":"note","x":10,"y":10,"w":80,"h":60,"text":"hello"}]},"version":1}')"
+contains "saving a scene moves the version" "$saved_board" '"version":2'
+check "a stale board save is refused" "409"     "$(status_of -X PUT "$BASE/api/whiteboards/$board_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"scene":{"items":[]},"version":1}')"
+contains "and the note survived the refusal"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/whiteboards/$board_id")" 'hello'
+
+sheet="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/sheets" -H "$AUTH"     -H 'Content-Type: application/json' -d '{"title":"Smoke sheet"}')"
+sheet_id="$(json_str "$sheet" id)"
+# Formulas are stored as written and evaluated in the browser, so what comes
+# back has to be the formula rather than yesterday's answer to it.
+contains "a formula is stored as written"     "$("${CURL[@]}" -X PUT "$BASE/api/sheets/$sheet_id" -H "$AUTH" -H 'Content-Type: application/json'         -d '{"cells":{"A1":{"v":"8"},"A2":{"f":"=SUM(A1:A1)"}},"version":1}')" '=SUM(A1:A1)'
+check "a stale sheet save is refused" "409"     "$(status_of -X PUT "$BASE/api/sheets/$sheet_id" -H "$AUTH" -H 'Content-Type: application/json' -d '{"cells":{},"version":1}')"
+
+view="$("${CURL[@]}" -X POST "$BASE/api/projects/$project_id/views" -H "$AUTH"     -H 'Content-Type: application/json'     -d '{"name":"Smoke view","kind":"list","groupBy":"priority","filters":{}}')"
+contains "a view can be saved" "$view" '"groupBy":"priority"'
+# A saved view naming a kind nothing renders is a tab that leads to an empty
+# screen, so the server refuses it rather than storing it.
+check "a view kind nothing draws is refused" "400"     "$(status_of -X POST "$BASE/api/projects/$project_id/views" -H "$AUTH" -H 'Content-Type: application/json' -d '{"name":"Bad","kind":"gallery","filters":{}}')"
+
+contains "clips list is well-formed when empty"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/projects/$project_id/clips")" '[]'
+# A clip is a recording. A general upload path living under /clips would be the
+# attachment path with none of its limits.
+check "a non-video clip is refused" "415"     "$(status_of -X POST "$BASE/api/projects/$project_id/clips" -H "$AUTH" -F 'file=@scripts/smoke-test.sh')"
+
+check "the new routes need a session" "401" "$(status_of "$BASE/api/whiteboards/$board_id")"
+check "deleting a board works" "204"     "$(status_of -X DELETE "$BASE/api/whiteboards/$board_id" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
 section "Triage suggestions"
 
 # The model is optional, and this suite runs against a stack that has none

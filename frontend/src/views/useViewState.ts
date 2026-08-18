@@ -111,7 +111,33 @@ export function useViewState(projectId: string | undefined) {
     );
   }, [state.filters]);
 
-  return { state, setKind, setGroupBy, setSort, setFilters, clearFilters, activeFilterCount };
+  /**
+   * Adopts a saved view wholesale.
+   *
+   * Everything at once rather than field by field: a view is a single idea
+   * ("my overdue work, grouped by person"), and applying half of it would put
+   * somebody in a state nobody saved.
+   */
+  const apply = useCallback(
+    (view: {
+      kind: ViewKind;
+      groupBy: GroupBy;
+      filters: Partial<ViewFilters>;
+      sortBy?: string;
+      sortDirection?: string;
+    }) =>
+      setState((s) => ({
+        ...s,
+        kind: view.kind,
+        groupBy: view.groupBy,
+        filters: { ...s.filters, ...view.filters },
+        sortBy: (view.sortBy as ViewState['sortBy']) ?? s.sortBy,
+        sortDirection: (view.sortDirection as ViewState['sortDirection']) ?? s.sortDirection
+      })),
+    []
+  );
+
+  return { state, setKind, setGroupBy, setSort, setFilters, clearFilters, apply, activeFilterCount };
 }
 
 /**

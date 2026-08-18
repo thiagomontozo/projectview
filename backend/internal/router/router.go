@@ -198,6 +198,16 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Get("/{projectId}/intake", api.ListIntakeForms)
 		r.Post("/{projectId}/intake", api.CreateIntakeForm)
 		r.Get("/{projectId}/fields", api.ListCustomFields)
+		// The four project documents. All of them ask the same question first -
+		// may this person work in this project - so they sit in the same group.
+		r.Get("/{projectId}/views", api.ListSavedViews)
+		r.Post("/{projectId}/views", api.CreateSavedView)
+		r.Get("/{projectId}/whiteboards", api.ListWhiteboards)
+		r.Post("/{projectId}/whiteboards", api.CreateWhiteboard)
+		r.Get("/{projectId}/sheets", api.ListSheets)
+		r.Post("/{projectId}/sheets", api.CreateSheet)
+		r.Get("/{projectId}/clips", api.ListClips)
+		r.Post("/{projectId}/clips", api.UploadClip)
 		r.Post("/{projectId}/fields", api.CreateCustomField)
 		r.Get("/{projectId}/automations", api.ListAutomations)
 		r.Post("/{projectId}/automations", api.CreateAutomation)
@@ -208,6 +218,33 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Post("/{id}/baselines", api.CaptureBaseline)
 		r.Get("/{id}/earned-value", api.EarnedValue)
 		r.Get("/{id}/export.csv", api.ExportProjectTasks)
+	})
+
+	r.Route("/api/views", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Delete("/{id}", api.DeleteSavedView)
+	})
+
+	r.Route("/api/whiteboards", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/{id}", api.GetWhiteboard)
+		r.Put("/{id}", api.SaveWhiteboard)
+		r.Delete("/{id}", api.DeleteWhiteboard)
+	})
+
+	r.Route("/api/sheets", func(r chi.Router) {
+		r.Use(requireAuth)
+		r.Get("/{id}", api.GetSheet)
+		r.Put("/{id}", api.SaveSheet)
+		r.Delete("/{id}", api.DeleteSheet)
+	})
+
+	r.Route("/api/clips", func(r chi.Router) {
+		r.Use(requireAuth)
+		// The bytes are reached through a signed URL rather than through this
+		// process: a recording is tens of megabytes served with range requests.
+		r.Get("/{id}/url", api.ClipURL)
+		r.Delete("/{id}", api.DeleteClip)
 	})
 
 	r.Route("/api/fields", func(r chi.Router) {

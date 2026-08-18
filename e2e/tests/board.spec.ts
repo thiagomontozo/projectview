@@ -132,7 +132,9 @@ test.describe('the board', () => {
     await dialog.getByRole('button', { name: label.create }).click();
 
     await expect(dialog).toBeHidden();
-    await expect(page.getByText(name)).toBeVisible();
+    // Scoped to the main region: the sidebar tree lists every project too, so
+    // an unscoped match now finds the card and the tree entry.
+    await expect(page.getByRole('main').getByText(name)).toBeVisible();
 
     // Cleaned up here rather than in afterAll: this project is the test's own
     // output, and leaving it behind would make a second run of the suite create
