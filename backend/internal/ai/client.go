@@ -44,11 +44,14 @@ type Client struct {
 	http *http.Client
 }
 
-// New builds a client, or returns nil when the configuration is incomplete.
-// A nil *Client is a working value: every method answers ErrDisabled, so
-// callers need no nil check of their own.
+// New builds a client, or returns nil when there is no endpoint. A nil *Client
+// is a working value: every method answers ErrDisabled, so callers need no nil
+// check of their own.
+//
+// The model name is optional. Left empty it is discovered from the endpoint's
+// own /models route, which is part of the same standard - see models.go.
 func New(cfg Config) (*Client, error) {
-	if cfg.Endpoint == "" || cfg.Model == "" {
+	if cfg.Endpoint == "" {
 		return nil, nil
 	}
 	// Normalised before it is validated, in that order. The other way round
@@ -66,6 +69,9 @@ func New(cfg Config) (*Client, error) {
 
 func (c *Client) Enabled() bool { return c != nil }
 
+// Model is the name that was configured, which is empty when it is being
+// discovered. What a request actually used comes back on the Result, since
+// that is the only value that is true for certain.
 func (c *Client) Model() string {
 	if c == nil {
 		return ""
@@ -237,10 +243,14 @@ type completionResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// Result is what one completion produced, with what it cost.
+// Result is what one completion produced, with what it cost and which model
+// produced it - the last of these because the model may have been discovered
+// rather than configured, and a suggestion has to record what actually
+// answered it.
 type Result struct {
 	Content string
 	Tokens  int
+	Model   string
 }
 
 // Complete sends a conversation and returns the reply.
@@ -254,8 +264,13 @@ func (c *Client) Complete(ctx context.Context, messages []Message, jsonOutput bo
 		return nil, ErrDisabled
 	}
 
+	model, err := c.resolveModel(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	payload := completionRequest{
-		Model:       c.cfg.Model,
+		Model:       model,
 		Messages:    messages,
 		Temperature: 0.1,
 		MaxTokens:   500,
@@ -313,5 +328,6 @@ func (c *Client) Complete(ctx context.Context, messages []Message, jsonOutput bo
 	return &Result{
 		Content: parsed.Choices[0].Message.Content,
 		Tokens:  parsed.Usage.TotalTokens,
+		Model:   model,
 	}, nil
 }

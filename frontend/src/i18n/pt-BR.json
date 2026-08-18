@@ -501,10 +501,11 @@
     "testBound": "Autenticado como {{name}}",
     "runTest": "Testar",
     "group_ai": "Modelo",
-    "groupHint_ai": "Um endpoint compatível com a API da OpenAI. Aponte para um provedor hospedado ou para o servidor de inferência da sua rede — basta o endereço e a porta; o protocolo e o caminho /v1 são preenchidos automaticamente. Serve para sugerir prioridade e responsável nos envios de solicitação; uma pessoa aplica a sugestão, nada muda sozinho.",
+    "groupHint_ai": "Um endpoint compatível com a API da OpenAI. Aponte para um provedor hospedado ou para o servidor de inferência da sua rede — basta o endereço e a porta; o protocolo e o caminho /v1 são preenchidos automaticamente. Deixe o nome do modelo em branco e ele é identificado pelo próprio endpoint. Serve para sugerir prioridade e responsável nos envios de solicitação; uma pessoa aplica a sugestão, nada muda sozinho.",
     "testAi": "Testar o modelo",
     "testAiHint": "Envia um pedido curto com as configurações em vigor.",
-    "testAiOk": "{{model}} respondeu."
+    "testAiOk": "{{model}} respondeu.",
+    "testAiDetected": "{{model}} respondeu — escolhido automaticamente entre os {{count}} que o endpoint oferece."
   },
   "users": {
     "title": "Usuários",

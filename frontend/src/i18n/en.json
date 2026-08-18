@@ -501,10 +501,11 @@
     "testBound": "Authenticated as {{name}}",
     "runTest": "Test",
     "group_ai": "Model",
-    "groupHint_ai": "An OpenAI-compatible endpoint. Point it at a hosted provider or at your own inference server — an address and port is enough; the protocol and the /v1 path are filled in for you. Used to suggest a priority and an assignee on intake submissions; a person applies the suggestion, nothing is changed automatically.",
+    "groupHint_ai": "An OpenAI-compatible endpoint. Point it at a hosted provider or at your own inference server — an address and port is enough; the protocol and the /v1 path are filled in for you. Leave the model name empty and it is detected from the endpoint itself. Used to suggest a priority and an assignee on intake submissions; a person applies the suggestion, nothing is changed automatically.",
     "testAi": "Test the model",
     "testAiHint": "Sends one short prompt with the settings in force.",
-    "testAiOk": "{{model}} answered."
+    "testAiOk": "{{model}} answered.",
+    "testAiDetected": "{{model}} answered — chosen automatically from {{count}} the endpoint offers."
   },
   "users": {
     "title": "Users",

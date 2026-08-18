@@ -97,7 +97,7 @@ func (c *Client) Triage(ctx context.Context, in TriageInput) (*Suggestion, error
 	}
 
 	suggestion := validate(result.Content, in)
-	suggestion.Model = c.cfg.Model
+	suggestion.Model = result.Model
 	suggestion.Tokens = result.Tokens
 	return suggestion, nil
 }

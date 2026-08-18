@@ -377,7 +377,14 @@ function TestAIRow() {
           loading={test.isPending}
           onClick={() =>
             test.mutate(undefined, {
-              onSuccess: (result) => toast.success(t('admin.testAiOk', { model: result.model })),
+              onSuccess: (result) =>
+                toast.success(
+                  // An automatic choice nobody can see is a choice nobody can
+                  // disagree with, so the name it settled on is named.
+                  result.detected
+                    ? t('admin.testAiDetected', { model: result.model, count: result.available })
+                    : t('admin.testAiOk', { model: result.model })
+                ),
               onError: (error) => toast.error(errorMessage(error, t('errors.genericBody')))
             })
           }

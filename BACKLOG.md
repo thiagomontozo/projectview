@@ -406,6 +406,18 @@ Four decisions worth keeping:
   so Azure's `/openai/deployments/{name}` still works. Normalisation runs
   **before** validation, or the very input this exists to accept would be
   refused for having no scheme.
+- **The model name is discovered, not typed.** Asked for immediately after the
+  first version shipped, and correctly: the same standard that defines
+  `/chat/completions` defines `/models`, so an endpoint that has been given to
+  us already answers "which model?". Left empty, the name is read from there
+  once and remembered for ten minutes. When a server offers several, models
+  that cannot chat are excluded outright and a small model is preferred over a
+  large one — this task is classification against four fixed values, which a
+  large model does not do better, only more expensively. The choice is
+  **stable**, so a suggestion cannot change character between sweeps because a
+  server listed its models in a different order, and it is visible: named by
+  the test button and stored on every suggestion. `AI_MODEL` still wins when
+  set.
 - **The key is optional, and the field always exists.** A model on a company's
   own network usually has no authentication; a hosted provider rejects
   everything without one. An empty key sends no `Authorization` header at all

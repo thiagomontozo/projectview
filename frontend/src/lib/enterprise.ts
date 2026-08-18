@@ -385,7 +385,15 @@ export function useTestAI() {
   return useMutation({
     mutationFn: () =>
       api
-        .post<{ ok: boolean; model: string; reply: string; tokens: number }>('/settings/test/ai')
+        .post<{
+          ok: boolean;
+          model: string;
+          /** True when the name was chosen from the endpoint's own /models. */
+          detected: boolean;
+          available: number;
+          reply: string;
+          tokens: number;
+        }>('/settings/test/ai')
         .then((r) => r.data)
   });
 }

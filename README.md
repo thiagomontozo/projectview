@@ -35,9 +35,11 @@ Progress by phase is in [ROADMAP.md](ROADMAP.md); what is still to build is in
   intake queue that is its own kind of record is a second inbox nobody watches.
   A form can be made public: the address is 128 bits from `crypto/rand` rather
   than a name, since a public form is reachable by anyone who learns it.
-- **Triage suggestions from a model, optional** — with an OpenAI-compatible
-  endpoint configured, a background sweep asks a model to propose a priority
-  and an assignee for each new submission. It **suggests**; a person applies it
+- **Triage suggestions from a model, optional** — give it the address of an
+  OpenAI-compatible endpoint and a background sweep asks a model to propose a
+  priority and an assignee for each new submission. The address is all it
+  needs: the protocol, the `/v1` path and the model name are all worked out
+  from the endpoint itself. It **suggests**; a person applies it
   from the intake screen, and nothing changes on its own. See
   [Triage suggestions](#triage-suggestions-optional).
 - **Teams, projects, tasks and sub-tasks** — full CRUD. A sub-task is simply a
@@ -606,8 +608,25 @@ environment:
 | `AI_ENABLED` | Off by default |
 | `AI_ENDPOINT` | The address. `192.168.1.50:8000` is enough |
 | `AI_API_KEY` | Optional — usually empty for a model on your own network, required by hosted providers |
-| `AI_MODEL` | The model name the endpoint expects |
+| `AI_MODEL` | Optional — detected from the endpoint's `/models` when empty |
 | `AI_TIMEOUT_SECONDS` | Defaults to 30 |
+
+**The model name is optional too.** The same standard that defines
+`/chat/completions` defines `/models`, so an endpoint that has been given to us
+already answers "which model?". Left empty, the name is discovered from there
+once and remembered for ten minutes — not per request, since the sweep builds a
+fresh client every pass.
+
+When a server offers several, the choice is deliberate in two ways. Models that
+cannot hold a conversation — embeddings, speech, image, the legacy completions
+family — are excluded outright, because sending this prompt to one is an error
+rather than a worse answer. Among the rest a small model is preferred over a
+large one: this task is classifying a short request against four priorities and
+a handful of names, which a large model does not do better, only more
+expensively. The result is **stable** — the same list always yields the same
+model, so a suggestion cannot silently change character between sweeps — and
+the chosen name is shown by **Test the model**, stored on every suggestion it
+produces, and overridden by `AI_MODEL` whenever you disagree with it.
 
 The endpoint is the address as you would say it. The protocol and the `/v1`
 path are filled in when you leave them out — `http` for an address on a private
@@ -688,7 +707,7 @@ See [.env.example](.env.example) for the full, commented list. Summary:
 | `AUDIT_RETENTION_DAYS`, `NOTIFICATION_RETENTION_DAYS`, `RETENTION_CRON` | Retention; both windows default to 0, which keeps everything |
 | `STORAGE_ENDPOINT`, `STORAGE_PUBLIC_URL`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_REGION`, `STORAGE_FORCE_PATH_STYLE`, `STORAGE_URL_TTL_MINUTES` | Attachment object storage; an empty bucket disables attachments |
 | `ATTACHMENT_MAX_MB`, `ATTACHMENT_MAX_TASK_MB`, `ATTACHMENT_ALLOWED_TYPES` | Per-file and per-task ceilings, and an optional MIME allow-list |
-| `AI_ENABLED`, `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL`, `AI_TIMEOUT_SECONDS` | Optional triage suggestions from an OpenAI-compatible model; the key is optional, the endpoint accepts a bare `ip:port` |
+| `AI_ENABLED`, `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL`, `AI_TIMEOUT_SECONDS` | Optional triage suggestions from an OpenAI-compatible model; the endpoint accepts a bare `ip:port`, and the key and model name are both optional — the model is detected from `/models` |
 | `SETTINGS_ENV_FILE` | Where the settings screen mirrors its `.env` copy; empty disables mirroring |
 | `TLS_COMMON_NAME`, `PROXY_HTTP_PORT`, `PROXY_HTTPS_PORT` | Edge proxy and TLS |
 

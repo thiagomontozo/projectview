@@ -163,6 +163,11 @@ func (a *API) reloadSettings(ctx context.Context) string {
 		a.OIDC.ForgetDiscovery()
 	}
 
+	// Same reasoning for the model discovered from /models: a new endpoint may
+	// not serve the name the old one did, and the stored name exists to save a
+	// round trip rather than to be remembered.
+	ai.ForgetDiscovered()
+
 	// The cron expressions are read when a schedule is built, so applying the
 	// new configuration is not enough on its own - the schedules have to be
 	// rebuilt against it. Without this the field would accept a value and go on
@@ -299,12 +304,21 @@ func (a *API) TestAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !client.Enabled() {
-		httpx.Error(w, http.StatusBadRequest, "An endpoint and a model name are both required.")
+		httpx.Error(w, http.StatusBadRequest, "An endpoint is required.")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.Timeout)*time.Second)
 	defer cancel()
+
+	// Asked fresh rather than from whatever was discovered earlier: the point
+	// of pressing Test is to find out what the endpoint says right now.
+	ai.ForgetDiscovered()
+
+	// Listed first, so the answer can say how the model was arrived at. A
+	// failure here is not fatal - a server that does not implement /models can
+	// still complete, as long as a name was configured.
+	available, listErr := client.Models(ctx)
 
 	result, err := client.Complete(ctx, []ai.Message{
 		{Role: "user", Content: "Reply with the single word: ready"},
@@ -313,14 +327,25 @@ func (a *API) TestAI(w http.ResponseWriter, r *http.Request) {
 		// Passed through rather than flattened: "connection refused",
 		// "404 page not found" and "invalid api key" send an administrator to
 		// three different places, and the third is usually the /v1 suffix.
+		if listErr != nil && settings.Model == "" {
+			// With no name configured, a failure to list is the actual cause
+			// and the completion error is a consequence of it.
+			httpx.Error(w, http.StatusBadGateway, listErr.Error())
+			return
+		}
 		httpx.Error(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"model":  client.Model(),
-		"reply":  result.Content,
-		"tokens": result.Tokens,
+		"ok":    true,
+		"model": result.Model,
+		// Whether the name was chosen here or typed in, and out of how many.
+		// An automatic choice that nobody can see is a choice nobody can
+		// disagree with.
+		"detected":  settings.Model == "",
+		"available": len(available),
+		"reply":     result.Content,
+		"tokens":    result.Tokens,
 	})
 }
