@@ -11,6 +11,7 @@ import (
 	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/httpx"
+	"projectview/internal/logger"
 	"projectview/internal/models"
 	"projectview/internal/repo"
 )
@@ -373,4 +374,97 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(runes[:max])
+}
+
+// POST /api/intake/submissions/:id/accept
+//
+// Applies a model's suggestion to the task it produced.
+//
+// The whole reason the suggestion is stored rather than applied is that a
+// person decides, and this is where they decide. The values are re-checked
+// here rather than trusted from the stored blob: the suggestion was validated
+// when it arrived, but the project's membership and the task itself can have
+// changed since, and applying a stale assignee would be a different kind of
+// wrong answer.
+func (a *API) AcceptIntakeSuggestion(w http.ResponseWriter, r *http.Request) {
+	submissionID, ok := httpx.UUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+
+	submission, form, err := a.Intake.SubmissionWithForm(ctx, submissionID)
+	if err != nil {
+		respondRepoError(w, err, "Submission not found.")
+		return
+	}
+	// Accepting changes a task, so it takes the permission to work in the
+	// project the form feeds - not merely to have found the submission.
+	if _, ok := a.requireProjectWork(w, r, form.ProjectID); !ok {
+		return
+	}
+	if submission.TaskID == nil {
+		httpx.Error(w, http.StatusConflict, "That submission has no task to apply anything to.")
+		return
+	}
+	if submission.Suggestion == nil {
+		httpx.Error(w, http.StatusConflict, "There is no suggestion on that submission yet.")
+		return
+	}
+	// One acceptance per suggestion. Applying the same values twice changes
+	// nothing on the task, but it writes a second "a person agreed" to the
+	// trail - and the reason acceptance is recorded at all is to be able to
+	// count later how often the suggestions were any good.
+	if submission.AcceptedAt != nil {
+		httpx.Error(w, http.StatusConflict, "That suggestion has already been applied.")
+		return
+	}
+
+	patch := repo.TaskPatch{}
+	applied := map[string]any{}
+
+	if priority, _ := submission.Suggestion["priority"].(string); models.ValidPriority(priority) {
+		patch.Priority = &priority
+		applied["priority"] = priority
+	}
+	if raw, _ := submission.Suggestion["assigneeId"].(string); raw != "" {
+		if assignee, err := uuid.Parse(raw); err == nil {
+			// Re-checked against the project as it stands now, not as it stood
+			// when the model answered.
+			if person, err := a.Users.ByID(ctx, assignee); err == nil && person.Active {
+				list := []uuid.UUID{assignee}
+				patch.Assignees = &list
+				applied["assignee"] = person.Name
+			}
+		}
+	}
+
+	if len(applied) == 0 {
+		httpx.Error(w, http.StatusConflict, "That suggestion has nothing left to apply.")
+		return
+	}
+	if err := a.Tasks.Update(ctx, *submission.TaskID, patch); err != nil {
+		respondRepoError(w, err, "Task not found.")
+		return
+	}
+
+	requester := auth.CurrentUser(r)
+	if err := a.Intake.MarkAccepted(ctx, submissionID, requester.ID); err != nil {
+		logger.Warn("could not mark submission %s accepted: %v", submissionID, err)
+	}
+
+	// Recorded as its own action: "a model proposed this" and "a person agreed"
+	// are different events, and only keeping both makes it possible to tell
+	// later whether the suggestions are worth anything.
+	a.Audit.Record(r, requester, audit.Event{
+		Action: audit.ActionTriageAccepted, ResourceType: "intake_submission",
+		ResourceID: submissionID.String(), Changes: applied, Status: http.StatusOK,
+	})
+
+	updated, err := a.Tasks.ByID(ctx, *submission.TaskID)
+	if err != nil {
+		respondRepoError(w, err, "Task not found.")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, a.populateTask(ctx, *updated, false))
 }

@@ -374,6 +374,22 @@ export function useTestAD() {
   });
 }
 
+/**
+ * Asks the model to answer, with the settings that are actually in force.
+ *
+ * No body: unlike the directory test, there are no credentials to supply for
+ * the occasion — the endpoint and the key are the stored configuration, and a
+ * test against anything else would be testing the wrong thing.
+ */
+export function useTestAI() {
+  return useMutation({
+    mutationFn: () =>
+      api
+        .post<{ ok: boolean; model: string; reply: string; tokens: number }>('/settings/test/ai')
+        .then((r) => r.data)
+  });
+}
+
 /* --- Administration: accounts --------------------------------------------------- */
 
 export interface NewUser {

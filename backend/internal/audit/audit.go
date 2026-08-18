@@ -64,6 +64,11 @@ const (
 	// somebody with no account, and the trail still needs the event.
 	ActionIntakeSubmitted = "intake.submitted"
 
+	// A model proposing something and a person agreeing are different events,
+	// and only keeping both makes it possible to tell later whether the
+	// suggestions were any good.
+	ActionTriageAccepted = "intake.triage_accepted"
+
 	ActionTemplateCreated = "template.created"
 	ActionTemplateApplied = "template.applied"
 

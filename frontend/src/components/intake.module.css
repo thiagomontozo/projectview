@@ -1,0 +1,105 @@
+.hint,
+.muted {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--space-2);
+}
+
+.panel {
+  margin-top: var(--space-4);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.submissions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.entry {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.entryHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.answers {
+  margin: var(--space-2) 0 0;
+  display: grid;
+  gap: 2px;
+}
+
+.answer {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.answer dt {
+  color: var(--text-muted);
+  min-width: 10rem;
+}
+
+.answer dd {
+  margin: 0;
+}
+
+/* The suggestion is set apart on purpose. A priority rendered in the same
+   weight as the rest of the row would be indistinguishable from one a person
+   chose, and keeping those two things distinguishable is the reason the
+   suggestion is stored separately in the first place. */
+.suggestion {
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.summary {
+  margin: var(--space-2) 0 0;
+}
+
+.field {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-2);
+}
+
+.checkbox {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}

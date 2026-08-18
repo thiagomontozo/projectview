@@ -8,17 +8,18 @@ import { useToast } from '../ui/Toast';
 import { Shield } from '../ui/icons';
 import controls from '../ui/controls.module.css';
 import { useAuth } from '../lib/auth';
-import { downloadUrl } from '../lib/api';
+import { downloadUrl, errorMessage } from '../lib/api';
 import {
   useAdminSettings,
   useSaveAdminSettings,
   useTestAD,
+  useTestAI,
   useTestSMTP,
   type AdminSetting
 } from '../lib/enterprise';
 import styles from './pages.module.css';
 
-const GROUPS = ['ad', 'smtp', 'oidc', 'alerts', 'retention'] as const;
+const GROUPS = ['ad', 'smtp', 'oidc', 'ai', 'alerts', 'retention'] as const;
 
 /**
  * Integration settings, editable without a redeploy.
@@ -150,6 +151,7 @@ export default function AdminSettingsPage() {
 
                 {group === 'smtp' && <TestSMTPRow />}
                 {group === 'ad' && <TestADRow />}
+                {group === 'ai' && <TestAIRow />}
               </Card>
             </div>
           ))}
@@ -343,5 +345,46 @@ export function AdminBadge() {
     <Badge tone="accent">
       <Shield size={12} /> {t('admin.title')}
     </Badge>
+  );
+}
+
+/**
+ * Asks the configured model to say one word.
+ *
+ * The endpoint is typed by hand and the commonest mistakes are all
+ * distinguishable from each other — a refused connection, a 404 from a missing
+ * /v1, a rejected key — so the server's own message is shown rather than a
+ * flattened "test failed". Sending somebody to the right one of those three is
+ * the entire value of the button.
+ */
+function TestAIRow() {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const test = useTestAI();
+
+  return (
+    <div className={styles.settingRow}>
+      <label>
+        {t('admin.testAi')}
+        <span className={styles.subtle} style={{ display: 'block' }}>
+          {t('admin.testAiHint')}
+        </span>
+      </label>
+      <div className={styles.settingControl}>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={test.isPending}
+          onClick={() =>
+            test.mutate(undefined, {
+              onSuccess: (result) => toast.success(t('admin.testAiOk', { model: result.model })),
+              onError: (error) => toast.error(errorMessage(error, t('errors.genericBody')))
+            })
+          }
+        >
+          {t('admin.runTest')}
+        </Button>
+      </div>
+    </div>
   );
 }

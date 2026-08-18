@@ -525,6 +525,38 @@ check "closing a form closes it" "200"     "$(status_of -X PATCH "$BASE/api/inta
 check "a closed form is not reachable" "404" "$(status_of "$BASE/api/public/intake/$intake_slug")"
 
 # ---------------------------------------------------------------------------
+section "Triage suggestions"
+
+# The model is optional, and this suite runs against a stack that has none
+# configured. What is asserted here is therefore the behaviour with the feature
+# off - which is the configuration most installations will run, and the one
+# where a regression would otherwise go unnoticed.
+
+settings_json="$("${CURL[@]}" -H "$AUTH" "$BASE/api/settings")"
+contains "the model endpoint is a managed setting" "$settings_json" '"AI_ENDPOINT"'
+# Never read back, like every other stored secret.
+if printf '%s' "$settings_json" | grep -q '"AI_API_KEY"[^}]*"value"'; then
+    fail "the model key is not readable" "$settings_json"
+else
+    pass "the model key is not readable"
+fi
+
+# Testing a model that is switched off is a mistake worth naming, not a
+# connection attempt to nowhere.
+check "testing a model that is off is refused" "400"     "$(status_of -X POST "$BASE/api/settings/test/ai" -H "$AUTH")"
+
+# Submissions carry the suggestion field whether or not anything filled it in,
+# so the interface does not have to tell "no model" from "old row".
+submissions_json="$("${CURL[@]}" -H "$AUTH" "$BASE/api/intake/$intake_id/submissions")"
+contains "submissions are listed with their triage state" "$submissions_json" '"createdAt"'
+
+submission_id="$(json_str "$submissions_json" id)"
+# Nothing has been suggested with no model configured, so there is nothing to
+# apply - and applying nothing must be refused rather than quietly succeed.
+check "applying a suggestion that does not exist is refused" "409"     "$(status_of -X POST "$BASE/api/intake/submissions/$submission_id/accept" -H "$AUTH")"
+check "applying to an unknown submission is not found" "404"     "$(status_of -X POST "$BASE/api/intake/submissions/00000000-0000-0000-0000-000000000000/accept" -H "$AUTH")"
+
+# ---------------------------------------------------------------------------
 section "Date-windowed listings"
 check "a malformed window is refused" "400"     "$(status_of -H "$AUTH" "$BASE/api/tasks?dueFrom=yesterday")"
 contains "a window still reports a total"     "$("${CURL[@]}" -H "$AUTH" "$BASE/api/tasks?projectId=$project_id&limit=1&total=true&dueFrom=2020-01-01T00:00:00Z&dueTo=2030-01-01T00:00:00Z")" '"total"'

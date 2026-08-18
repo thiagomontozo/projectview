@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"projectview/internal/ai"
 	"projectview/internal/audit"
 	"projectview/internal/auth"
 	"projectview/internal/config"
@@ -269,4 +271,56 @@ func (a *API) DownloadEnv(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="projectview.env"`)
 	w.Write([]byte(out.String()))
+}
+
+// POST /api/settings/test/ai
+//
+// Proves the endpoint an administrator typed actually answers, before anything
+// depends on it. The settings screen already does this for mail and the
+// directory, and it matters more here: the address is usually an internal host
+// given as IP and port, and the commonest mistake is omitting the "/v1" that
+// almost every compatible server mounts its routes under. A failure that says
+// so beats a background sweep quietly producing nothing.
+func (a *API) TestAI(w http.ResponseWriter, r *http.Request) {
+	settings := a.Cfg.AI()
+	if !settings.Enabled {
+		httpx.Error(w, http.StatusBadRequest, "Turn the model on before testing it.")
+		return
+	}
+
+	client, err := ai.New(ai.Config{
+		Endpoint: settings.Endpoint,
+		APIKey:   settings.APIKey,
+		Model:    settings.Model,
+		Timeout:  time.Duration(settings.Timeout) * time.Second,
+	})
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !client.Enabled() {
+		httpx.Error(w, http.StatusBadRequest, "An endpoint and a model name are both required.")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.Timeout)*time.Second)
+	defer cancel()
+
+	result, err := client.Complete(ctx, []ai.Message{
+		{Role: "user", Content: "Reply with the single word: ready"},
+	}, false)
+	if err != nil {
+		// Passed through rather than flattened: "connection refused",
+		// "404 page not found" and "invalid api key" send an administrator to
+		// three different places, and the third is usually the /v1 suffix.
+		httpx.Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"model":  client.Model(),
+		"reply":  result.Content,
+		"tokens": result.Tokens,
+	})
 }

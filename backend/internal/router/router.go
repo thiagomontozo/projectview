@@ -149,6 +149,9 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Get("/env", api.DownloadEnv)
 		r.Post("/test/smtp", api.TestSMTP)
 		r.Post("/test/ad", api.TestAD)
+		// The model endpoint is usually an internal host given as IP and port,
+		// and the commonest mistake is omitting the "/v1" its routes sit under.
+		r.Post("/test/ai", api.TestAI)
 	})
 
 	// Machine credentials are administrative: a token is a way in that outlives
@@ -266,6 +269,8 @@ func New(api *handlers.API, cfg *config.Config, hub *ws.Hub, metrics *obs.Metric
 		r.Patch("/{id}", api.SetIntakeFormEnabled)
 		r.Delete("/{id}", api.DeleteIntakeForm)
 		r.Get("/{id}/submissions", api.IntakeSubmissions)
+		// A model suggests; a person decides. This is where they decide.
+		r.Post("/submissions/{id}/accept", api.AcceptIntakeSuggestion)
 	})
 
 	// The public half of intake. Outside every authenticated group, so it

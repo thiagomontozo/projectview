@@ -27,7 +27,10 @@ import type {
   User,
   WorkloadChartRow,
   WorkloadRow,
-  CompletionTrendRow
+  CompletionTrendRow,
+  IntakeForm,
+  IntakeField,
+  IntakeSubmission
 } from '../types';
 
 /* -----------------------------------------------------------------------------
@@ -87,6 +90,8 @@ export const keys = {
   customFields: (projectId: string) => ['projects', projectId, 'fields'] as const,
   taskTime: (taskId: string) => ['tasks', taskId, 'time'] as const,
   attachments: (taskId: string) => ['tasks', taskId, 'attachments'] as const,
+  intakeForms: (projectId: string) => ['projects', projectId, 'intake'] as const,
+  intakeSubmissions: (formId: string) => ['intake', formId, 'submissions'] as const,
   attachmentConfig: ['attachments', 'config'] as const,
   recurrence: (taskId: string) => ['tasks', taskId, 'recurrence'] as const,
   templates: (scope: string) => ['templates', scope] as const,
@@ -1178,5 +1183,75 @@ export function useRemoveTeamMember() {
     mutationFn: ({ teamId, userId }: { teamId: string; userId: string }) =>
       api.delete<Team>(`/teams/${teamId}/members/${userId}`).then((r) => r.data),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.teams })
+  });
+}
+
+/* --- Intake ---------------------------------------------------------------- */
+
+export function useIntakeForms(projectId?: string) {
+  return useQuery({
+    queryKey: keys.intakeForms(projectId ?? ''),
+    queryFn: () => api.get<IntakeForm[]>(`/projects/${projectId}/intake`).then((r) => r.data),
+    enabled: Boolean(projectId)
+  });
+}
+
+export function useCreateIntakeForm(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      title: string;
+      description?: string;
+      fields: IntakeField[];
+      targetStatus?: string;
+      targetPriority?: string;
+      public?: boolean;
+    }) => api.post<IntakeForm>(`/projects/${projectId}/intake`, body).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.intakeForms(projectId) })
+  });
+}
+
+export function useSetIntakeFormEnabled(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.patch<IntakeForm>(`/intake/${id}`, { enabled }).then((r) => r.data),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.intakeForms(projectId) })
+  });
+}
+
+export function useDeleteIntakeForm(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/intake/${id}`).then(() => id),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.intakeForms(projectId) })
+  });
+}
+
+export function useIntakeSubmissions(formId?: string) {
+  return useQuery({
+    queryKey: keys.intakeSubmissions(formId ?? ''),
+    queryFn: () => api.get<IntakeSubmission[]>(`/intake/${formId}/submissions`).then((r) => r.data),
+    enabled: Boolean(formId)
+  });
+}
+
+/**
+ * Applies a model's suggestion to the task the submission created.
+ *
+ * The suggestion is stored rather than applied precisely so that this call
+ * exists: a person decides. The board is invalidated as well as the list,
+ * because what changes is a task, not the submission.
+ */
+export function useAcceptSuggestion(projectId: string, formId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (submissionId: string) =>
+      api.post<Task>(`/intake/submissions/${submissionId}/accept`).then((r) => r.data),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.intakeSubmissions(formId) });
+      client.invalidateQueries({ queryKey: keys.projectTasks(projectId) });
+      client.invalidateQueries({ queryKey: keys.taskCounts(projectId) });
+    }
   });
 }

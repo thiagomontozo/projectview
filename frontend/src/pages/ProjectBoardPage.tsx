@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from '../app/AppShell';
@@ -6,7 +6,7 @@ import { Badge, Card, ErrorState } from '../ui/display';
 import { Button } from '../ui/Button';
 import { SkeletonList } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
-import { Plus } from '../ui/icons';
+import { Inbox, Plus } from '../ui/icons';
 import KanbanBoard from '../components/kanban/KanbanBoard';
 import TaskModal from '../components/TaskModal';
 import { BulkActionBar, ViewToolbar } from '../views/ViewToolbar';
@@ -28,6 +28,10 @@ import {
 } from '../lib/queries';
 import { statusOf } from '../lib/api';
 import type { Task } from '../types';
+
+// Loaded on demand: the form builder is opened rarely and has no business
+// sitting in the bundle every board render pays for.
+const IntakeDialog = lazy(() => import('../components/IntakeDialog'));
 
 interface ModalState {
   task?: Task;
@@ -98,6 +102,7 @@ export default function ProjectBoardPage() {
 
   const [modal, setModal] = useState<ModalState | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [intakeOpen, setIntakeOpen] = useState(false);
 
   const columns = useMemo(
     () => (project.data?.statuses ?? []).slice().sort((a, b) => a.order - b.order),
@@ -167,10 +172,16 @@ export default function ProjectBoardPage() {
         title={project.data.name}
         description={project.data.description}
         actions={
-          <Button variant="primary" onClick={() => setModal({ defaultStatus: columns[0]?.key })}>
-            <Plus size={16} />
-            {t('board.newTask')}
-          </Button>
+          <>
+            <Button variant="ghost" onClick={() => setIntakeOpen(true)}>
+              <Inbox size={16} />
+              {t('intake.title')}
+            </Button>
+            <Button variant="primary" onClick={() => setModal({ defaultStatus: columns[0]?.key })}>
+              <Plus size={16} />
+              {t('board.newTask')}
+            </Button>
+          </>
         }
       />
 
@@ -288,6 +299,12 @@ export default function ProjectBoardPage() {
         onPriorityChange={(priority) => applyToSelection({ priority })}
         onClear={() => setSelected(new Set())}
       />
+
+      {intakeOpen && (
+        <Suspense fallback={null}>
+          <IntakeDialog projectId={project.data.id} onClose={() => setIntakeOpen(false)} />
+        </Suspense>
+      )}
 
       {modal && (
         <TaskModal

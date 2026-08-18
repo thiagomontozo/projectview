@@ -383,6 +383,59 @@ doing only if somebody asks by name.
 
 ---
 
+## Asked for
+
+### ✅ An AI agent, OpenAI-compatible — done
+
+Asked for as "an AI agent in the OpenAI standard", scoped in conversation to
+triage of intake submissions and to an endpoint an administrator points at
+themselves — an internal inference host addressed by `IP:port` in the case that
+prompted it, a hosted provider in others.
+
+**What it does.** A sweep asks the model for a priority, an assignee and a
+summary for each untriaged submission. The answer is stored beside the
+submission and applied only when a person presses a button.
+
+Four decisions worth keeping:
+
+- **The wire format is not a setting.** The user's own words: *"o padrão openai
+  já deve estar implícito no código. O usuário só precisa informar ip:porta ou
+  a URL."* So `AI_ENDPOINT=192.168.1.50:8000` is accepted as typed — the
+  protocol is inferred (`http` for a private range, `https` otherwise), `/v1`
+  is appended when no path was given, and a path that *was* given is left alone
+  so Azure's `/openai/deployments/{name}` still works. Normalisation runs
+  **before** validation, or the very input this exists to accept would be
+  refused for having no scheme.
+- **The key is optional, and the field always exists.** A model on a company's
+  own network usually has no authentication; a hosted provider rejects
+  everything without one. An empty key sends no `Authorization` header at all
+  rather than an empty `Bearer`, which several compatible servers refuse.
+- **The allow-list is the security boundary, not the prompt.** Intake answers
+  are typed into a public form by somebody outside the company, so the input is
+  hostile by construction and no prompt wording reliably survives it. The
+  model's reply is checked against the four real priorities and the ids that
+  were actually sent; anything else is dropped. Proved end-to-end against a
+  stand-in server that returns an invented priority, an unoffered assignee and
+  a forty-line summary: nothing survived, and the accept endpoint answered 409
+  because there was nothing left to apply.
+- **Settings are re-read every pass.** The first version built the client at
+  boot, which quietly broke the promise the settings screen makes — an
+  administrator would turn the model on and nothing would happen until a
+  restart. It now reads the configuration per sweep, like the mailer reads SMTP
+  at send time, and there is a test that fails if that regresses.
+
+**Intake had no screen at all**, which this exposed rather than caused: the API
+had shipped without one, so a suggestion would have had nowhere to be seen and
+"a person confirms" — the entire safety argument — would have been unreachable.
+The form builder, the submissions list and the accept action were built here.
+
+Not done, and deliberately: no chat assistant, no writing of tasks by the
+model, no embedding or indexing of project data. Each of those is a different
+question about what leaves the building, and this one was answered narrowly on
+purpose.
+
+---
+
 ## Reported by a user
 
 ### ✅ Teams could be created but never staffed — fixed

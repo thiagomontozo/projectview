@@ -7,7 +7,7 @@ import "testing"
 // rather than assuming: a collision would not fail, it would quietly make two
 // unrelated sweeps take turns.
 func TestLockKeysAreDistinct(t *testing.T) {
-	keys := []LockKey{LockAlerts, LockDigests, LockRetention, LockRecurrence}
+	keys := []LockKey{LockAlerts, LockDigests, LockRetention, LockRecurrence, LockTriage}
 
 	seen := map[int64]LockKey{}
 	for _, key := range keys {

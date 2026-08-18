@@ -38,6 +38,9 @@ const (
 	LockDigests    LockKey = "projectview.digests"
 	LockRetention  LockKey = "projectview.retention"
 	LockRecurrence LockKey = "projectview.recurrence"
+	// Triage costs money per call, so duplicating it across replicas would be
+	// duplicating a bill rather than merely duplicating work.
+	LockTriage LockKey = "projectview.triage"
 )
 
 // The attachment object sweeper deliberately has no key. Deleting an object is

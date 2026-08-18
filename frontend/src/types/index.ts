@@ -309,3 +309,62 @@ export interface RealtimeMessage {
   type: 'notification' | 'chat:message' | 'chat:reaction' | 'presence' | 'typing';
   payload: unknown;
 }
+
+/* --- Intake ---------------------------------------------------------------- */
+
+export interface IntakeField {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'checkbox' | 'email';
+  required: boolean;
+  options?: string[];
+  help?: string;
+}
+
+export interface IntakeForm {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  fields: IntakeField[];
+  targetStatus: string;
+  targetPriority: string;
+  enabled: boolean;
+  public: boolean;
+  /** The unguessable part of the public address. 128 bits, not a name. */
+  slug: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * What a model proposed about a submission.
+ *
+ * Every field is optional because "the model had nothing usable to say" is a
+ * normal outcome, not an error: the server validates the reply against the
+ * project's own people and the four real priorities, and drops whatever is
+ * left over.
+ */
+export interface TriageSuggestion {
+  priority?: string;
+  assigneeId?: string;
+  assigneeName?: string;
+  summary?: string;
+  model?: string;
+  tokens?: number;
+}
+
+export interface IntakeSubmission {
+  id: string;
+  formId: string;
+  taskId?: string;
+  answers: Record<string, unknown>;
+  submitterName?: string;
+  submitterEmail?: string;
+  createdAt: string;
+  suggestion?: TriageSuggestion | null;
+  /** Set once the model has been asked, whether or not it answered usefully. */
+  suggestedAt?: string | null;
+  /** Set when a person applied the suggestion. */
+  acceptedAt?: string | null;
+}

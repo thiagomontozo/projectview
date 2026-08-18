@@ -35,6 +35,15 @@ type ManagedSetting struct {
 }
 
 var managed = []ManagedSetting{
+	// The model endpoint is a URL an administrator types in - their own
+	// inference host by address and port, or a hosted provider. Same wire
+	// format either way, which is why it is configuration and not a code path.
+	{Key: "AI_ENABLED", Group: "ai", Kind: KindBool},
+	{Key: "AI_ENDPOINT", Group: "ai", Kind: KindText},
+	{Key: "AI_API_KEY", Group: "ai", Kind: KindSecret, Secret: true},
+	{Key: "AI_MODEL", Group: "ai", Kind: KindText},
+	{Key: "AI_TIMEOUT_SECONDS", Group: "ai", Kind: KindNumber},
+
 	{Key: "AD_ENABLED", Group: "ad", Kind: KindBool},
 	{Key: "AD_URL", Group: "ad", Kind: KindText},
 	{Key: "AD_BASE_DN", Group: "ad", Kind: KindText},
@@ -138,6 +147,11 @@ func flatten(s runtimeSettings) map[string]string {
 		"OIDC_SCOPES":         s.OIDC.Scopes,
 		"OIDC_AUTO_PROVISION": strconv.FormatBool(s.OIDC.AutoProvision),
 
+		"AI_ENABLED":                  strconv.FormatBool(s.AI.Enabled),
+		"AI_ENDPOINT":                 s.AI.Endpoint,
+		"AI_API_KEY":                  s.AI.APIKey,
+		"AI_MODEL":                    s.AI.Model,
+		"AI_TIMEOUT_SECONDS":          strconv.Itoa(s.AI.Timeout),
 		"ALERT_WARN_DAYS_BEFORE":      strconv.Itoa(s.Alerts.WarnDaysBefore),
 		"ALERT_CRON":                  s.Alerts.CronExpr,
 		"RETENTION_CRON":              s.Retention.CronExpr,
@@ -203,6 +217,11 @@ func merge(baseline runtimeSettings, overrides map[string]string) runtimeSetting
 	text("OIDC_SCOPES", &out.OIDC.Scopes)
 	boolean("OIDC_AUTO_PROVISION", &out.OIDC.AutoProvision)
 
+	boolean("AI_ENABLED", &out.AI.Enabled)
+	text("AI_ENDPOINT", &out.AI.Endpoint)
+	text("AI_API_KEY", &out.AI.APIKey)
+	text("AI_MODEL", &out.AI.Model)
+	number("AI_TIMEOUT_SECONDS", &out.AI.Timeout)
 	number("ALERT_WARN_DAYS_BEFORE", &out.Alerts.WarnDaysBefore)
 	text("ALERT_CRON", &out.Alerts.CronExpr)
 	text("RETENTION_CRON", &out.Retention.CronExpr)

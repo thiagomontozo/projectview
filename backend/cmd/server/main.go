@@ -156,6 +156,14 @@ func main() {
 	api.Alerts = alertScheduler
 	api.Retention = retention
 
+	// Started unconditionally: whether a model is configured is re-read on
+	// every pass, because the setting is editable from the administration
+	// screen and is promised to take effect without a restart.
+	logger.Info("Suggestions: %s", enabledLabel(cfg.AI().Enabled))
+	triage := services.NewTriageSweep(cfg, api.Intake, api.Projects, api.Users)
+	triage.Guard = services.NewSweepGuard(store, db.LockTriage)
+	triage.Start()
+
 	if cfg.OIDC().Enabled {
 		api.OIDC = auth.NewOIDC(cfg)
 		logger.Info("Single sign-on enabled against %s (auto-provision: %v)",

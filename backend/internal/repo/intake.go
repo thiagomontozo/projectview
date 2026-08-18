@@ -174,6 +174,109 @@ type IntakeSubmission struct {
 	Name        string         `json:"submitterName,omitempty"`
 	Email       string         `json:"submitterEmail,omitempty"`
 	CreatedAt   time.Time      `json:"createdAt"`
+
+	// What a model proposed, and whether a person agreed. Null suggestion means
+	// it has not been asked; null acceptance means nobody has acted on it.
+	// Keeping the two apart is the only way to tell later whether the
+	// suggestions are worth anything.
+	Suggestion  map[string]any `json:"suggestion,omitempty"`
+	SuggestedAt *time.Time     `json:"suggestedAt,omitempty"`
+	AcceptedAt  *time.Time     `json:"acceptedAt,omitempty"`
+}
+
+// PendingTriage is one submission waiting to be looked at, with the project it
+// landed in so the sweep knows which people and statuses are on offer.
+type PendingTriage struct {
+	SubmissionID uuid.UUID
+	FormID       uuid.UUID
+	FormTitle    string
+	ProjectID    uuid.UUID
+	TaskID       *uuid.UUID
+	Answers      map[string]any
+	Fields       []IntakeField
+}
+
+// AwaitingTriage returns submissions no model has answered on yet.
+func (r *Intake) AwaitingTriage(ctx context.Context, limit int) ([]PendingTriage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.store.Pool.Query(ctx, `
+		SELECT s.id, s.form_id, f.title, f.project_id, s.task_id, s.answers, f.fields
+		  FROM intake_submissions s
+		  JOIN intake_forms f ON f.id = s.form_id
+		 WHERE s.suggested_at IS NULL
+		 ORDER BY s.created_at
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []PendingTriage{}
+	for rows.Next() {
+		var p PendingTriage
+		if err := rows.Scan(&p.SubmissionID, &p.FormID, &p.FormTitle, &p.ProjectID,
+			&p.TaskID, &p.Answers, &p.Fields); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// StoreSuggestion records what the model said.
+//
+// suggested_at is stamped whatever the suggestion contains, empty included: a
+// model that had nothing useful to offer has still been asked, and leaving the
+// stamp null would make the sweep ask again every few minutes forever.
+func (r *Intake) StoreSuggestion(ctx context.Context, submissionID uuid.UUID, suggestion map[string]any) error {
+	_, err := r.store.Pool.Exec(ctx, `
+		UPDATE intake_submissions
+		   SET suggestion = $2, suggested_at = now()
+		 WHERE id = $1`, submissionID, suggestion)
+	return err
+}
+
+// SubmissionWithForm loads one submission together with the form it came
+// through, which is what carries the project a permission check needs.
+func (r *Intake) SubmissionWithForm(ctx context.Context, id uuid.UUID) (*IntakeSubmission, *IntakeForm, error) {
+	var s IntakeSubmission
+	var formID uuid.UUID
+	err := r.store.Pool.QueryRow(ctx, `
+		SELECT id, form_id, task_id, answers, submitted_by, submitter_name,
+		       submitter_email, created_at, suggestion, suggested_at, accepted_at
+		  FROM intake_submissions WHERE id = $1`, id).
+		Scan(&s.ID, &s.FormID, &s.TaskID, &s.Answers, &s.SubmittedBy, &s.Name,
+			&s.Email, &s.CreatedAt, &s.Suggestion, &s.SuggestedAt, &s.AcceptedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	formID = s.FormID
+
+	form, err := r.ByID(ctx, formID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &s, form, nil
+}
+
+// MarkAccepted records that a person applied the suggestion.
+func (r *Intake) MarkAccepted(ctx context.Context, submissionID, userID uuid.UUID) error {
+	tag, err := r.store.Pool.Exec(ctx, `
+		UPDATE intake_submissions
+		   SET accepted_at = now(), accepted_by = $2
+		 WHERE id = $1`, submissionID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // RecordSubmission stores what was asked for, beside the task it produced.
@@ -199,7 +302,8 @@ func (r *Intake) Submissions(ctx context.Context, formID uuid.UUID, limit int) (
 		limit = 50
 	}
 	rows, err := r.store.Pool.Query(ctx, `
-		SELECT id, form_id, task_id, answers, submitted_by, submitter_name, submitter_email, created_at
+		SELECT id, form_id, task_id, answers, submitted_by, submitter_name, submitter_email,
+		       created_at, suggestion, suggested_at, accepted_at
 		  FROM intake_submissions WHERE form_id = $1 ORDER BY created_at DESC LIMIT $2`, formID, limit)
 	if err != nil {
 		return nil, err
@@ -210,7 +314,7 @@ func (r *Intake) Submissions(ctx context.Context, formID uuid.UUID, limit int) (
 	for rows.Next() {
 		var s IntakeSubmission
 		if err := rows.Scan(&s.ID, &s.FormID, &s.TaskID, &s.Answers, &s.SubmittedBy,
-			&s.Name, &s.Email, &s.CreatedAt); err != nil {
+			&s.Name, &s.Email, &s.CreatedAt, &s.Suggestion, &s.SuggestedAt, &s.AcceptedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

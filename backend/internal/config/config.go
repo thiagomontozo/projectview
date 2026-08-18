@@ -116,6 +116,21 @@ type AttachmentsConfig struct {
 	AllowedTypes []string
 }
 
+// AIConfig points at an OpenAI-compatible chat completions endpoint.
+//
+// Managed from the settings screen rather than fixed at deploy, because which
+// model an installation uses is exactly the kind of thing that changes: one
+// company points this at its own inference host by address and port, another at
+// a hosted provider. The wire format is the same either way, so it is a URL
+// rather than a code path.
+type AIConfig struct {
+	Enabled  bool
+	Endpoint string
+	APIKey   string
+	Model    string
+	Timeout  int
+}
+
 // RetentionConfig bounds how long two tables nobody prunes by hand are kept.
 // Zero disables a sweep entirely - the honest default, since deleting records
 // is not something to start doing because a config file was left empty.
@@ -160,11 +175,19 @@ type Config struct {
 
 // runtimeSettings groups the sections a settings change may replace.
 type runtimeSettings struct {
+	AI        AIConfig
 	AD        ADConfig
 	SMTP      SMTPConfig
 	OIDC      OIDCConfig
 	Alerts    AlertsConfig
 	Retention RetentionConfig
+}
+
+// AI returns a copy of the current model settings.
+func (c *Config) AI() AIConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.effective.AI
 }
 
 // AD returns a copy of the current directory settings.
@@ -334,6 +357,14 @@ func Load() *Config {
 	}
 
 	cfg.baseline = runtimeSettings{
+		AI: AIConfig{
+			Enabled:  getbool("AI_ENABLED", false),
+			Endpoint: getenv("AI_ENDPOINT", ""),
+			APIKey:   getenv("AI_API_KEY", ""),
+			Model:    getenv("AI_MODEL", ""),
+			Timeout:  getint("AI_TIMEOUT_SECONDS", 30),
+		},
+
 		AD: ADConfig{
 			Enabled:               getbool("AD_ENABLED", false),
 			URL:                   getenv("AD_URL", "ldap://dc.example.com:389"),
